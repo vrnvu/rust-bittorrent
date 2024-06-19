@@ -92,8 +92,8 @@ async fn main() -> anyhow::Result<()> {
     assert!(!announce_response.peers.is_empty());
 
     for peer in announce_response.peers {
-        let peer_ip = handshake(&info_hash_bytes, &peer).await?;
-        dbg!(peer_ip);
+        let peer_id = handshake(&info_hash_bytes, &peer).await?;
+        dbg!(peer_id);
     }
 
     Ok(())
