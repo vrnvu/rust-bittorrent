@@ -9,6 +9,42 @@ use tokio::{
     net::TcpStream,
 };
 
+#[derive(Debug)]
+struct HandshakeMessage {
+    peer_id: [u8; 20],
+    info_hash_bytes: [u8; 20],
+}
+
+impl HandshakeMessage {
+    fn new(info_hash_bytes: [u8; 20]) -> Self {
+        let peer_id: [u8; 20] = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9];
+        Self {
+            peer_id,
+            info_hash_bytes,
+        }
+    }
+
+    async fn send(self, peer: &SocketAddr) -> anyhow::Result<PeerStream> {
+        let mut stream = TcpStream::connect(peer).await?;
+
+        let mut buffer: Vec<u8> = Vec::with_capacity(68);
+        buffer.push(19);
+        buffer.extend("BitTorrent protocol".as_bytes());
+        buffer.extend(&[0_u8; 8]);
+        buffer.extend(self.info_hash_bytes);
+        buffer.extend(self.peer_id);
+        stream.write_all(&buffer).await?;
+
+        stream.read_exact(&mut buffer).await?;
+        assert!(buffer.len() == 68);
+        let peer_id = &buffer[48..];
+        Ok(PeerStream {
+            peer_id: hex::encode(&peer_id),
+            stream: stream,
+        })
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct AnnounceResponseRaw {
     interval: i64,
@@ -38,7 +74,13 @@ impl From<AnnounceResponseRaw> for AnnounceResponse {
     }
 }
 
-async fn get_announce(torrent: &Torrent, info_hash: &str) -> anyhow::Result<AnnounceResponse> {
+#[derive(Debug)]
+struct PeerStream {
+    peer_id: String,
+    stream: TcpStream,
+}
+
+async fn try_announce(torrent: &Torrent, info_hash: &str) -> anyhow::Result<AnnounceResponse> {
     let client = reqwest::Client::new();
     let announce_url = &torrent
         .announce
@@ -64,37 +106,27 @@ async fn get_announce(torrent: &Torrent, info_hash: &str) -> anyhow::Result<Anno
     }
 }
 
-async fn handshake(info_hash_bytes: &[u8], peer: &SocketAddr) -> anyhow::Result<String> {
-    let mut stream = TcpStream::connect(peer).await?;
-
-    let peer_id: [u8; 20] = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9];
-    let mut buffer: Vec<u8> = Vec::with_capacity(68);
-    buffer.push(19);
-    buffer.extend("BitTorrent protocol".as_bytes());
-    buffer.extend(&[0_u8; 8]);
-    buffer.extend(info_hash_bytes);
-    buffer.extend(&peer_id);
-    stream.write_all(&buffer).await?;
-
-    stream.read_exact(&mut buffer).await?;
-    assert!(buffer.len() == 68);
-    let peer_id = &buffer[48..];
-    Ok(hex::encode(&peer_id))
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let path = "sample.torrent";
     let torrent: Torrent = Torrent::read_from_file(path).expect("cannot read from file");
-    let info_hash_bytes = torrent.info_hash_bytes();
-    let info_hash: String = form_urlencoded::byte_serialize(&info_hash_bytes).collect();
-    let announce_response = get_announce(&torrent, &info_hash).await?;
+
+    let vec_info_hash_bytes = torrent.info_hash_bytes();
+    let info_hash: String = form_urlencoded::byte_serialize(&vec_info_hash_bytes).collect();
+
+    let mut info_hash_bytes = [0u8; 20];
+    info_hash_bytes.copy_from_slice(&vec_info_hash_bytes);
+
+    let announce_response = try_announce(&torrent, &info_hash).await?;
     assert!(!announce_response.peers.is_empty());
 
-    for peer in announce_response.peers {
-        let peer_id = handshake(&info_hash_bytes, &peer).await?;
-        dbg!(peer_id);
-    }
+    let peer = announce_response
+        .peers
+        .get(0)
+        .expect("expected one peer at least");
+
+    let peer_stream = HandshakeMessage::new(info_hash_bytes).send(peer).await?;
+    dbg!(&peer_stream);
 
     Ok(())
 }
