@@ -29,5 +29,18 @@ async fn main() -> anyhow::Result<()> {
         bail!("expected bitfield as first receive message from peer")
     }
 
+    torrent::PeerMessage::Interested
+        .send(&mut peer_stream.stream)
+        .await?;
+    dbg!("interested send to peer");
+
+    if let torrent::PeerMessage::Unchoke =
+        torrent::PeerMessage::receive(&mut peer_stream.stream).await?
+    {
+        dbg!("unchocked successfully");
+    } else {
+        bail!("expected unchock message from peer")
+    }
+
     Ok(())
 }
