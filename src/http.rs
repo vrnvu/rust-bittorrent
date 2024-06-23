@@ -1,6 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use anyhow::{bail, Context};
+use log::{debug, error, info};
 use serde_bytes::ByteBuf;
 use serde_derive::Deserialize;
 
@@ -41,11 +42,15 @@ pub async fn try_announce(torrent: &Torrent) -> anyhow::Result<AnnounceResponse>
         .torrent
         .announce
         .clone()
-        .with_context(|| "Announce URL is missing")?;
+        .context("announce URL is missing")?;
+
     let info_hash = &torrent.info_hash;
     let url = format!("{announce_url}/?info_hash={info_hash}");
+
+    info!("sending announce request to {}", url);
+
     let r = client
-        .get(url)
+        .get(&url)
         .query(&[("peer_id", "00112233445566778899")])
         .query(&[("port", 6881)])
         .query(&[("uploaded", 0)])
@@ -53,12 +58,18 @@ pub async fn try_announce(torrent: &Torrent) -> anyhow::Result<AnnounceResponse>
         .query(&[("left", &torrent.torrent.length)])
         .query(&[("compact", 1)])
         .send()
-        .await?;
+        .await
+        .with_context(|| format!("failed to send request to {}", url))?;
+
     if r.status().is_success() {
-        let bytes = r.bytes().await?;
-        let resp = serde_bencode::de::from_bytes::<AnnounceResponseRaw>(&bytes)?;
+        let bytes = r.bytes().await.context("failed to read response bytes")?;
+        let resp = serde_bencode::de::from_bytes::<AnnounceResponseRaw>(&bytes)
+            .context("failed to deserialize announce response")?;
+        debug!("announce response: {:?}", resp);
         return Ok(AnnounceResponse::from(resp));
     } else {
-        bail!(r.status())
+        let status = r.status();
+        error!("announce request failed with status: {}", status);
+        bail!("announce request failed with status: {}", status);
     }
 }

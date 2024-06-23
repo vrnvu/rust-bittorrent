@@ -1,6 +1,7 @@
 use std::{io::Write, net::SocketAddr, path::Path};
 
 use anyhow::{bail, Context, Ok};
+use log::{debug, error, info};
 use sha1::{Digest, Sha1};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -21,7 +22,7 @@ impl Torrent {
         P: AsRef<Path>,
     {
         let torrent = lava_torrent::torrent::v1::Torrent::read_from_file(path)
-            .expect("cannot read torrent from file");
+            .context("cannot read torrent from file")?;
 
         let vec_info_hash_bytes = torrent.info_hash_bytes();
         let info_hash: String = form_urlencoded::byte_serialize(&vec_info_hash_bytes).collect();
@@ -56,19 +57,23 @@ impl Torrent {
                 length: block_size,
             }
             .send(stream)
-            .await?;
+            .await
+            .context("failed to send PeerMessage::Request")?;
 
             if let PeerMessage::Piece {
                 index,
                 begin,
                 block,
-            } = PeerMessage::receive(stream).await?
+            } = PeerMessage::receive(stream)
+                .await
+                .context("failed to receive PeerMessage::Piece")?
             {
                 assert_eq!(piece_index, index);
                 assert_eq!(begin_offset, begin);
                 piece.splice(begin as usize..begin as usize, block.into_iter());
             } else {
-                bail!("expected piece message from peer")
+                error!("expected piece message from peer");
+                bail!("expected piece message from peer");
             }
             begin_offset += block_size;
             remain -= block_size as u32;
@@ -88,7 +93,8 @@ impl Torrent {
 
         if *piece_hash != current_hash {
             bail!(
-                "want: {}, got: {}",
+                "hash mismatch for index {}: expected {}, got {}",
+                piece_index,
                 hex::encode(piece_hash),
                 hex::encode(current_hash)
             )
@@ -102,12 +108,15 @@ impl Torrent {
         for (index, _) in self.torrent.pieces.iter().enumerate() {
             let piece = self.download_piece(stream, index as u32).await?;
             downloaded_torrent.push(piece);
-            dbg!("piece downloaded successfully");
+            debug!("piece downloaded successfully");
         }
         let output_path = "done.txt";
-        let mut f = std::fs::File::create(output_path)?;
+        let mut f = std::fs::File::create(output_path).context("cannot create output file")?;
         let bytes = downloaded_torrent.concat();
-        f.write_all(&bytes)?;
+        f.write_all(&bytes)
+            .with_context(|| format!("failed to write downloaded data to file {}", output_path))?;
+        info!("torrent downloaded successfully to {}", output_path);
+
         Ok(())
     }
 }
@@ -132,28 +141,36 @@ impl HandshakeMessage {
     }
 
     pub async fn send(&mut self, peer: &SocketAddr) -> anyhow::Result<&mut Self> {
-        let mut stream = TcpStream::connect(peer).await?;
+        let mut stream = TcpStream::connect(peer)
+            .await
+            .context("failed to connect to peer")?;
         self.buffer.push(19);
         self.buffer.extend("BitTorrent protocol".as_bytes());
         self.buffer.extend(&[0_u8; 8]);
         self.buffer.extend(self.info_hash_bytes);
         self.buffer.extend(self.peer_id);
-        stream.write_all(&self.buffer).await?;
+        stream
+            .write_all(&self.buffer)
+            .await
+            .context("failed to send handshake")?;
         self.stream = Some(stream);
         Ok(self)
     }
 
     pub async fn receive(&mut self) -> anyhow::Result<PeerStream> {
         if let Some(mut stream) = self.stream.take() {
-            stream.read_exact(&mut self.buffer).await?;
-            assert!(self.buffer.len() == 68);
+            stream
+                .read_exact(&mut self.buffer)
+                .await
+                .context("failed to receive handshake")?;
             let peer_id = &self.buffer[48..];
             Ok(PeerStream {
                 peer_id: hex::encode(&peer_id),
                 stream: stream,
             })
         } else {
-            bail!("stream was not initialized in Handshake")
+            error!("stream was not initialized in Handshake");
+            bail!("stream was not initialized in Handshake");
         }
     }
 }
@@ -189,14 +206,9 @@ impl PeerMessage {
     pub async fn send(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
         let mut buffer = Vec::new();
         match self {
-            PeerMessage::Choke => todo!(),
-            PeerMessage::Unchoke => todo!(),
             PeerMessage::Interested => {
                 buffer.write_u8(2).await?;
             }
-            PeerMessage::NotInterested => todo!(),
-            PeerMessage::Have => todo!(),
-            PeerMessage::Bitfield(_) => todo!(),
             PeerMessage::Request {
                 index,
                 begin,
@@ -207,12 +219,7 @@ impl PeerMessage {
                 buffer.write_u32(*begin).await?;
                 buffer.write_u32(*length).await?;
             }
-            PeerMessage::Piece {
-                index,
-                begin,
-                block,
-            } => todo!(),
-            PeerMessage::Cancel => todo!(),
+            _ => todo!(),
         }
         stream.write_u32(buffer.len() as u32).await?;
         stream.write_all(&buffer).await?;
@@ -220,24 +227,45 @@ impl PeerMessage {
     }
 
     pub async fn receive(stream: &mut TcpStream) -> anyhow::Result<Self> {
-        let mut size = stream.read_u32().await?;
+        let mut size = stream
+            .read_u32()
+            .await
+            .context("failed to read message size")?;
         while size == 0 {
-            size = stream.read_u32().await?;
+            size = stream
+                .read_u32()
+                .await
+                .context("failed to read message size")?;
         }
 
-        let tag = stream.read_u8().await?;
+        let tag = stream
+            .read_u8()
+            .await
+            .context("failed to read message tag")?;
         match tag {
             1 => Ok(Self::Unchoke),
             5 => {
                 let mut buff = vec![0; size as usize - 1];
-                stream.read_exact(&mut buff).await?;
+                stream
+                    .read_exact(&mut buff)
+                    .await
+                    .context("failed to read Bitfield payload")?;
                 Ok(Self::Bitfield(buff))
             }
             7 => {
-                let index = stream.read_u32().await?;
-                let begin = stream.read_u32().await?;
+                let index = stream
+                    .read_u32()
+                    .await
+                    .context("failed to read Piece index")?;
+                let begin = stream
+                    .read_u32()
+                    .await
+                    .context("failed to read Piece begin offset")?;
                 let mut block = vec![0; size as usize - 8 - 1]; // 2 * u32 - 1
-                stream.read_exact(&mut block).await?;
+                stream
+                    .read_exact(&mut block)
+                    .await
+                    .context("failed to read Piece block")?;
                 Ok(Self::Piece {
                     index,
                     begin,
