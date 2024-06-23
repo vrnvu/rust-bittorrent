@@ -287,17 +287,17 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_try_announce_success() -> anyhow::Result<()> {
+    async fn test_read_torrent_from_path() {
         // Mock a sample.torrent file for testing
         let path = "sample.torrent";
 
         // Test Torrent::from_path
-        let torrent = Torrent::from_path(path)?;
+        let torrent = Torrent::from_path(path);
+        assert!(torrent.is_ok());
+
         assert_eq!(
             "http://bittorrent-test-tracker.codecrafters.io/announce",
-            torrent.torrent.announce.unwrap()
+            torrent.unwrap().torrent.announce.unwrap()
         );
-
-        Ok(())
     }
 }

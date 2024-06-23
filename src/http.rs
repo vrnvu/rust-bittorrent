@@ -3,9 +3,32 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use anyhow::{bail, Context};
 use log::{debug, error, info};
 use serde_bytes::ByteBuf;
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 
 use crate::torrent::Torrent;
+
+pub struct AnnounceRequest {
+    announce_url: String,
+    info_hash: String,
+    left: i64,
+}
+
+impl AnnounceRequest {
+    pub fn new(torrent: &Torrent) -> anyhow::Result<Self> {
+        let announce_url = torrent
+            .torrent
+            .announce
+            .clone()
+            .context("announce URL is missing")?;
+        let info_hash = torrent.info_hash.clone();
+        let left = torrent.torrent.length;
+        Ok(AnnounceRequest {
+            announce_url,
+            info_hash,
+            left,
+        })
+    }
+}
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -14,7 +37,7 @@ pub struct AnnounceResponse {
     pub peers: Vec<SocketAddr>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct AnnounceResponseRaw {
     interval: i64,
     peers: ByteBuf,
@@ -36,15 +59,12 @@ impl From<AnnounceResponseRaw> for AnnounceResponse {
     }
 }
 
-pub async fn try_announce(torrent: &Torrent) -> anyhow::Result<AnnounceResponse> {
+pub async fn try_announce(request: AnnounceRequest) -> anyhow::Result<AnnounceResponse> {
     let client = reqwest::Client::new();
-    let announce_url = &torrent
-        .torrent
-        .announce
-        .clone()
-        .context("announce URL is missing")?;
 
-    let info_hash = &torrent.info_hash;
+    let announce_url = request.announce_url;
+    let info_hash = request.info_hash;
+    let left = request.left;
     let url = format!("{announce_url}/?info_hash={info_hash}");
 
     info!("sending announce request to {}", url);
@@ -55,7 +75,7 @@ pub async fn try_announce(torrent: &Torrent) -> anyhow::Result<AnnounceResponse>
         .query(&[("port", 6881)])
         .query(&[("uploaded", 0)])
         .query(&[("downloaded", 0)])
-        .query(&[("left", &torrent.torrent.length)])
+        .query(&[("left", left)])
         .query(&[("compact", 1)])
         .send()
         .await

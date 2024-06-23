@@ -2,6 +2,7 @@ use std::env;
 
 use anyhow::{bail, Context};
 use clap::Parser;
+use http::AnnounceRequest;
 use log::{debug, error, info};
 
 mod cli;
@@ -22,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
     let torrent: torrent::Torrent = torrent::Torrent::from_path(&path)
         .with_context(|| format!("failed to read {} file", path))?;
 
-    let announce_response = http::try_announce(&torrent)
+    let announce_response = http::try_announce(AnnounceRequest::new(&torrent)?)
         .await
         .context("failed to get announce information for torrent")?;
     assert!(!announce_response.peers.is_empty());
