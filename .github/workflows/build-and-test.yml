@@ -27,7 +27,18 @@ jobs:
           rustup component add rustfmt
           rustup component add clippy
 
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
+
       - name: Build and test
         run: |
           cargo build --verbose --all
           cargo test --verbose --all
+
+      - name: Run cargo clippy
+        run: |
+          cargo clippy --all-targets --all -- --deny=warnings
+
+      - name: Run cargo audit
+        run: |
+          (cargo install cargo-audit && cargo audit)
