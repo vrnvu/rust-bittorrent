@@ -46,8 +46,8 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let piece = torrent.download_piece(&mut peer_stream.stream, 0).await?;
-    dbg!("piece downloaded successfully");
+    torrent.download(&mut peer_stream.stream).await?;
+    dbg!("torrent downloaded successfully");
 
     Ok(())
 }

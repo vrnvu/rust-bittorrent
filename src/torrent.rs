@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::Path};
+use std::{io::Write, net::SocketAddr, path::Path};
 
 use anyhow::{bail, Context, Ok};
 use sha1::{Digest, Sha1};
@@ -36,7 +36,7 @@ impl Torrent {
     }
 
     pub async fn download_piece(
-        self,
+        &self,
         stream: &mut TcpStream,
         piece_index: u32,
     ) -> anyhow::Result<Vec<u8>> {
@@ -97,8 +97,18 @@ impl Torrent {
         Ok(piece)
     }
 
-    pub async fn download(self) -> anyhow::Result<()> {
-        todo!()
+    pub async fn download(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
+        let mut downloaded_torrent = Vec::new();
+        for (index, _) in self.torrent.pieces.iter().enumerate() {
+            let piece = self.download_piece(stream, index as u32).await?;
+            downloaded_torrent.push(piece);
+            dbg!("piece downloaded successfully");
+        }
+        let output_path = "done.txt";
+        let mut f = std::fs::File::create(output_path)?;
+        let bytes = downloaded_torrent.concat();
+        f.write_all(&bytes)?;
+        Ok(())
     }
 }
 
