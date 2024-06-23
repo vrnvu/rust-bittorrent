@@ -1,4 +1,9 @@
-use std::{io::Write, net::SocketAddr, path::Path};
+use std::{
+    fs::{self, File},
+    io::Write,
+    net::SocketAddr,
+    path::Path,
+};
 
 use anyhow::{bail, Context, Ok};
 use log::{debug, error, info};
@@ -103,16 +108,20 @@ impl Torrent {
         Ok(piece)
     }
 
-    pub async fn download(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
+    pub async fn download(&self, stream: &mut TcpStream, output_path: &str) -> anyhow::Result<()> {
         let mut downloaded_torrent = Vec::new();
         for (index, _) in self.torrent.pieces.iter().enumerate() {
             let piece = self.download_piece(stream, index as u32).await?;
             downloaded_torrent.push(piece);
             debug!("piece downloaded successfully");
         }
-        let output_path = "done.txt";
-        let mut f = std::fs::File::create(output_path).context("cannot create output file")?;
         let bytes = downloaded_torrent.concat();
+        if let Some(parent) = Path::new(output_path).parent() {
+            fs::create_dir_all(parent).context("cannot create output directory")?;
+        }
+
+        let mut f = File::create(output_path).context("cannot create output file")?;
+
         f.write_all(&bytes)
             .with_context(|| format!("failed to write downloaded data to file {}", output_path))?;
         info!("torrent downloaded successfully to {}", output_path);

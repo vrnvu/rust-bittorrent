@@ -1,15 +1,25 @@
+use std::env;
+
 use anyhow::{bail, Context};
+use clap::Parser;
 use log::{debug, error, info};
 
+mod cli;
 mod http;
 mod torrent;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args = cli::Cli::parse();
+    if args.verbose {
+        env::set_var("RUST_LOG", "debug")
+    } else {
+        env::set_var("RUST_LOG", "info")
+    }
     env_logger::init();
 
-    let path = "sample.torrent";
-    let torrent: torrent::Torrent = torrent::Torrent::from_path(path)
+    let path = args.file;
+    let torrent: torrent::Torrent = torrent::Torrent::from_path(&path)
         .with_context(|| format!("failed to read {} file", path))?;
 
     let announce_response = http::try_announce(&torrent)
@@ -61,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     torrent
-        .download(&mut peer_stream.stream)
+        .download(&mut peer_stream.stream, &args.output_path)
         .await
         .context("failed to download torrent")?;
 
