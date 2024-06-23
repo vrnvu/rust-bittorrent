@@ -31,7 +31,7 @@ impl From<AnnounceResponseRaw> for AnnounceResponse {
         }
         AnnounceResponse {
             interval: value.interval,
-            peers: peers,
+            peers,
         }
     }
 }
@@ -66,7 +66,7 @@ pub async fn try_announce(torrent: &Torrent) -> anyhow::Result<AnnounceResponse>
         let resp = serde_bencode::de::from_bytes::<AnnounceResponseRaw>(&bytes)
             .context("failed to deserialize announce response")?;
         debug!("announce response: {:?}", resp);
-        return Ok(AnnounceResponse::from(resp));
+        Ok(AnnounceResponse::from(resp))
     } else {
         let status = r.status();
         error!("announce request failed with status: {}", status);

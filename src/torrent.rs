@@ -76,7 +76,7 @@ impl Torrent {
                 bail!("expected piece message from peer");
             }
             begin_offset += block_size;
-            remain -= block_size as u32;
+            remain -= block_size;
         }
 
         let piece_hash = self
@@ -165,8 +165,8 @@ impl HandshakeMessage {
                 .context("failed to receive handshake")?;
             let peer_id = &self.buffer[48..];
             Ok(PeerStream {
-                peer_id: hex::encode(&peer_id),
-                stream: stream,
+                peer_id: hex::encode(peer_id),
+                stream,
             })
         } else {
             error!("stream was not initialized in Handshake");
