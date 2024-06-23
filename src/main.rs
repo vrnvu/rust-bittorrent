@@ -18,6 +18,8 @@ async fn main() -> anyhow::Result<()> {
 
     let mut peer_stream = torrent::HandshakeMessage::new(torrent.info_hash_bytes)
         .send(peer)
+        .await?
+        .receive()
         .await?;
     dbg!(&peer_stream);
 
@@ -39,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     {
         dbg!("unchocked successfully");
     } else {
-        bail!("expected unchock message from peer")
+        bail!("expected unchocke message from peer")
     }
 
     Ok(())
