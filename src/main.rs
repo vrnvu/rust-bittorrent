@@ -23,12 +23,13 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     dbg!(&peer_stream);
 
-    if let torrent::PeerMessage::Bitfield(payload) =
-        torrent::PeerMessage::receive(&mut peer_stream.stream).await?
-    {
-        dbg!(&payload);
-    } else {
-        bail!("expected bitfield as first receive message from peer")
+    match torrent::PeerMessage::receive(&mut peer_stream.stream).await? {
+        torrent::PeerMessage::Bitfield(payload) => {
+            dbg!(&payload);
+        }
+        other => {
+            bail!("expected: Bitfield, got:{:?}", other);
+        }
     }
 
     torrent::PeerMessage::Interested
@@ -36,13 +37,17 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     dbg!("interested send to peer");
 
-    if let torrent::PeerMessage::Unchoke =
-        torrent::PeerMessage::receive(&mut peer_stream.stream).await?
-    {
-        dbg!("unchocked successfully");
-    } else {
-        bail!("expected unchocke message from peer")
+    match torrent::PeerMessage::receive(&mut peer_stream.stream).await? {
+        torrent::PeerMessage::Unchoke => {
+            dbg!("unchoke received");
+        }
+        other => {
+            bail!("expected: Unchoke, got:{:?}", other);
+        }
     }
+
+    let piece = torrent.download_piece(&mut peer_stream.stream, 0).await?;
+    dbg!("piece downloaded successfully");
 
     Ok(())
 }

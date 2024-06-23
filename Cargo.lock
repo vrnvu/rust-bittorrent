@@ -1002,6 +1002,7 @@ dependencies = [
  "serde_bencode",
  "serde_bytes",
  "serde_derive",
+ "sha1",
  "tokio",
  "tokio-macros",
 ]

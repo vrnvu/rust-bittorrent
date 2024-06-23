@@ -1,10 +1,13 @@
 use std::{net::SocketAddr, path::Path};
 
-use anyhow::{bail, Context};
+use anyhow::{bail, Context, Ok};
+use sha1::{Digest, Sha1};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
+
+const BLOCK_MAX_SIZE: u32 = 1 << 14;
 
 pub struct Torrent {
     pub torrent: lava_torrent::torrent::v1::Torrent,
@@ -31,7 +34,74 @@ impl Torrent {
             info_hash_bytes,
         })
     }
+
+    pub async fn download_piece(
+        self,
+        stream: &mut TcpStream,
+        piece_index: u32,
+    ) -> anyhow::Result<Vec<u8>> {
+        let piece_length = self
+            .torrent
+            .piece_length
+            .min(self.torrent.length - (self.torrent.piece_length * piece_index as i64));
+
+        let mut piece: Vec<u8> = Vec::with_capacity(piece_length as usize);
+        let mut begin_offset: u32 = 0;
+        let mut remain: u32 = piece_length as u32;
+        while remain != 0 {
+            let block_size = BLOCK_MAX_SIZE.min(remain);
+            PeerMessage::Request {
+                index: piece_index,
+                begin: begin_offset,
+                length: block_size,
+            }
+            .send(stream)
+            .await?;
+
+            if let PeerMessage::Piece {
+                index,
+                begin,
+                block,
+            } = PeerMessage::receive(stream).await?
+            {
+                assert_eq!(piece_index, index);
+                assert_eq!(begin_offset, begin);
+                piece.splice(begin as usize..begin as usize, block.into_iter());
+            } else {
+                bail!("expected piece message from peer")
+            }
+            begin_offset += block_size;
+            remain -= block_size as u32;
+        }
+
+        let piece_hash = self
+            .torrent
+            .pieces
+            .get(piece_index as usize)
+            .context("invalid index for piece hash")?;
+
+        let current_hash: [u8; 20] = {
+            let mut hasher = Sha1::new();
+            hasher.update(&piece);
+            hasher.finalize().into()
+        };
+
+        if *piece_hash != current_hash {
+            bail!(
+                "want: {}, got: {}",
+                hex::encode(piece_hash),
+                hex::encode(current_hash)
+            )
+        }
+
+        Ok(piece)
+    }
+
+    pub async fn download(self) -> anyhow::Result<()> {
+        todo!()
+    }
 }
+
 #[derive(Debug)]
 pub struct HandshakeMessage {
     peer_id: [u8; 20],
@@ -84,6 +154,7 @@ pub struct PeerStream {
     pub stream: TcpStream,
 }
 
+#[derive(Debug)]
 pub enum PeerMessage {
     Choke,
     Unchoke,
@@ -91,47 +162,77 @@ pub enum PeerMessage {
     NotInterested,
     Have,
     Bitfield(Vec<u8>),
-    Request,
-    Piece,
+    Request {
+        index: u32,
+        begin: u32,
+        length: u32,
+    },
+    Piece {
+        index: u32,
+        begin: u32,
+        block: Vec<u8>,
+    },
     Cancel,
 }
 
 impl PeerMessage {
     pub async fn send(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
+        let mut buffer = Vec::new();
         match self {
             PeerMessage::Choke => todo!(),
             PeerMessage::Unchoke => todo!(),
             PeerMessage::Interested => {
-                stream.write_u32(1).await?;
-                stream.write_u8(2).await?;
+                buffer.write_u8(2).await?;
             }
             PeerMessage::NotInterested => todo!(),
             PeerMessage::Have => todo!(),
             PeerMessage::Bitfield(_) => todo!(),
-            PeerMessage::Request => todo!(),
-            PeerMessage::Piece => todo!(),
+            PeerMessage::Request {
+                index,
+                begin,
+                length,
+            } => {
+                buffer.write_u8(6).await?;
+                buffer.write_u32(*index).await?;
+                buffer.write_u32(*begin).await?;
+                buffer.write_u32(*length).await?;
+            }
+            PeerMessage::Piece {
+                index,
+                begin,
+                block,
+            } => todo!(),
             PeerMessage::Cancel => todo!(),
         }
+        stream.write_u32(buffer.len() as u32).await?;
+        stream.write_all(&buffer).await?;
         Ok(())
     }
+
     pub async fn receive(stream: &mut TcpStream) -> anyhow::Result<Self> {
-        dbg!("receive fun call");
         let mut size = stream.read_u32().await?;
-        dbg!(&size);
         while size == 0 {
             size = stream.read_u32().await?;
-            dbg!(&size);
         }
 
         let tag = stream.read_u8().await?;
         match tag {
             1 => Ok(Self::Unchoke),
             5 => {
-                dbg!(tag);
                 let mut buff = vec![0; size as usize - 1];
                 stream.read_exact(&mut buff).await?;
-                dbg!(&buff);
                 Ok(Self::Bitfield(buff))
+            }
+            7 => {
+                let index = stream.read_u32().await?;
+                let begin = stream.read_u32().await?;
+                let mut block = vec![0; size as usize - 8 - 1]; // 2 * u32 - 1
+                stream.read_exact(&mut block).await?;
+                Ok(Self::Piece {
+                    index,
+                    begin,
+                    block,
+                })
             }
             _ => bail!("unexpected tag message received, not implemented yet"),
         }
