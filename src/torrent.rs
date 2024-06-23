@@ -183,11 +183,8 @@ pub struct PeerStream {
 
 #[derive(Debug)]
 pub enum PeerMessage {
-    Choke,
     Unchoke,
     Interested,
-    NotInterested,
-    Have,
     Bitfield(Vec<u8>),
     Request {
         index: u32,
@@ -199,7 +196,6 @@ pub enum PeerMessage {
         begin: u32,
         block: Vec<u8>,
     },
-    Cancel,
 }
 
 impl PeerMessage {
@@ -274,5 +270,25 @@ impl PeerMessage {
             }
             _ => bail!("unexpected tag message received, not implemented yet"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_try_announce_success() -> anyhow::Result<()> {
+        // Mock a sample.torrent file for testing
+        let path = "sample.torrent";
+
+        // Test Torrent::from_path
+        let torrent = Torrent::from_path(path)?;
+        assert_eq!(
+            "http://bittorrent-test-tracker.codecrafters.io/announce",
+            torrent.torrent.announce.unwrap()
+        );
+
+        Ok(())
     }
 }

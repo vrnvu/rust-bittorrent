@@ -1118,7 +1118,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-bittorrent"
+name = "rust_bittorrent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
