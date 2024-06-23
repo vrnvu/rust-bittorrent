@@ -7,6 +7,7 @@ use serde_derive::{Deserialize, Serialize};
 
 use crate::torrent::Torrent;
 
+#[derive(Debug)]
 pub struct AnnounceRequest {
     announce_url: String,
     info_hash: String,
@@ -91,5 +92,107 @@ pub async fn try_announce(request: AnnounceRequest) -> anyhow::Result<AnnounceRe
         let status = r.status();
         error!("announce request failed with status: {}", status);
         bail!("announce request failed with status: {}", status);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_try_announce_success() {
+        let server = MockServer::start().await;
+        let mock_peers = vec![127, 0, 0, 1, 0x1A, 0xE1];
+        let mock_response = serde_bencode::to_bytes(&AnnounceResponseRaw {
+            interval: 123,
+            peers: ByteBuf::from(mock_peers),
+        });
+        assert!(mock_response.is_ok());
+
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(mock_response.unwrap(), "application/x-bencode"),
+            )
+            .mount(&server)
+            .await;
+
+        let request = AnnounceRequest {
+            announce_url: format!("{}/announce", server.uri()),
+            info_hash: "mock_info_hash".to_string(),
+            left: 0,
+        };
+
+        let result = try_announce(request).await;
+        assert!(result.is_ok());
+
+        let announce_response = result.unwrap();
+        assert_eq!(announce_response.interval, 123);
+        assert_eq!(announce_response.peers.len(), 1);
+        assert_eq!(
+            announce_response.peers[0],
+            "127.0.0.1:6881".parse().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_try_announce_failure() {
+        let server = MockServer::start().await;
+        let mock_peers = vec![127, 0, 0, 1, 0x1A, 0xE1];
+        let mock_response = serde_bencode::to_bytes(&AnnounceResponseRaw {
+            interval: 123,
+            peers: ByteBuf::from(mock_peers),
+        });
+        assert!(mock_response.is_ok());
+
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let request = AnnounceRequest {
+            announce_url: format!("{}/announce", server.uri()),
+            info_hash: "mock_info_hash".to_string(),
+            left: 0,
+        };
+
+        let result = try_announce(request).await;
+        assert!(result.is_err());
+
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "announce request failed with status: 500 Internal Server Error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_try_announce_failure_invalid_response() {
+        let server = MockServer::start().await;
+        let mock_invalid_response = serde_bencode::to_bytes(&String::from("some inalid content"));
+        assert!(mock_invalid_response.is_ok());
+
+        let mock_response = mock_invalid_response.unwrap();
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(mock_response, "application/x-bencode"),
+            )
+            .mount(&server)
+            .await;
+
+        let request = AnnounceRequest {
+            announce_url: format!("{}/announce", server.uri()),
+            info_hash: "mock_info_hash".to_string(),
+            left: 0,
+        };
+
+        let result = try_announce(request).await;
+        assert!(result.is_err());
+
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "failed to deserialize announce response"
+        );
     }
 }
