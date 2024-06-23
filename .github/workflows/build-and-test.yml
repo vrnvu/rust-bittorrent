@@ -1,0 +1,33 @@
+name: Build and test
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+
+      - name: Install dependencies
+        run: |
+          rustup component add rustfmt
+          rustup component add clippy
+
+      - name: Build and test
+        run: |
+          cargo build --verbose --all
+          cargo test --verbose --all
