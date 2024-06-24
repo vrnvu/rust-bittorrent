@@ -358,7 +358,7 @@ mod tests {
         handshake.send(&mock_addr).await?;
 
         // Wait for the mock peer to respond
-        let _ = rx.await?;
+        rx.await?;
 
         let peer_stream = handshake.receive().await?;
         assert_eq!(
