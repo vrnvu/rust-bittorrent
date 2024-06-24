@@ -323,7 +323,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_http_torrent_from_path() {
-        let path = "sample-http.torrent";
+        let path = "tests/sample-http.torrent";
 
         let torrent = Torrent::from_path(path);
         assert!(torrent.is_ok());
