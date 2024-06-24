@@ -113,7 +113,10 @@ impl Torrent {
         for (index, _) in self.torrent.pieces.iter().enumerate() {
             let piece = self.download_piece(stream, index as u32).await?;
             downloaded_torrent.push(piece);
-            debug!("piece downloaded successfully");
+            debug!(
+                "piece_index: {} downloaded successfully for info_hash: {}",
+                index, self.info_hash
+            );
         }
         let bytes = downloaded_torrent.concat();
         if let Some(parent) = Path::new(output_path).parent() {
@@ -124,7 +127,10 @@ impl Torrent {
 
         f.write_all(&bytes)
             .with_context(|| format!("failed to write downloaded data to file {}", output_path))?;
-        info!("torrent downloaded successfully to {}", output_path);
+        info!(
+            "torrent info_hash: {} downloaded successfully to {}",
+            self.info_hash, output_path
+        );
 
         Ok(())
     }
