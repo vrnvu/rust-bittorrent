@@ -290,6 +290,8 @@ impl PeerMessage {
 
 #[cfg(test)]
 mod tests {
+    use tokio::{net::TcpListener, sync::oneshot};
+
     use super::*;
 
     #[tokio::test]
@@ -303,5 +305,40 @@ mod tests {
             "http://bittorrent-test-tracker.codecrafters.io/announce",
             torrent.unwrap().torrent.announce.unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn test_peer_handshake() -> anyhow::Result<()> {
+        let mock_server = TcpListener::bind("127.0.0.1:0").await?;
+        let mock_addr = mock_server.local_addr()?;
+
+        let (tx, rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            if let Result::Ok((mut socket, _)) = mock_server.accept().await {
+                let mut buffer = [0; 68];
+                let _ = socket.read_exact(&mut buffer).await;
+                let _ = socket.write_all(&buffer).await;
+
+                // Notify the test that the handshake was received
+                let _ = tx.send(());
+            }
+        });
+
+        let mock_info_hash_bytes = [0_u8; 20];
+        let mut handshake = HandshakeMessage::new(mock_info_hash_bytes);
+
+        handshake.send(&mock_addr).await?;
+
+        // Wait for the mock peer to respond
+        let _ = rx.await?;
+
+        let peer_stream = handshake.receive().await?;
+        assert_eq!(
+            peer_stream.peer_id,
+            hex::encode([0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9])
+        );
+
+        Ok(())
     }
 }
