@@ -1,5 +1,5 @@
 use crate::http::{AnnounceRequest, AnnounceResponse};
 
 pub async fn try_announce(_: AnnounceRequest) -> anyhow::Result<AnnounceResponse> {
-    unimplemented!()
+    unimplemented!("announce tracker for udp is not yet implemented")
 }
