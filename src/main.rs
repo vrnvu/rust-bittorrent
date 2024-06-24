@@ -34,12 +34,16 @@ async fn main() -> anyhow::Result<()> {
         .context("expected one peer at least")?;
 
     let mut peer_stream = torrent::HandshakeMessage::new(torrent.info_hash_bytes)
-        .send(peer)
-        .await?
-        .receive()
-        .await?;
+        .initiate(peer)
+        .await
+        .with_context(|| {
+            format!(
+                "error handshake initiate for info_hash: {} with peer: {}",
+                torrent.info_hash, peer
+            )
+        })?;
     debug!("peer stream: {:?}", &peer_stream);
-    info!("handshake with peer {}", peer_stream.peer_id);
+    info!("handshake initiate with peer {}", peer_stream.peer_id);
 
     match torrent::PeerMessage::receive(&mut peer_stream.stream).await? {
         torrent::PeerMessage::Bitfield(payload) => {

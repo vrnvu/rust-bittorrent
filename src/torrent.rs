@@ -155,7 +155,11 @@ impl HandshakeMessage {
         }
     }
 
-    pub async fn send(&mut self, peer: &SocketAddr) -> anyhow::Result<&mut Self> {
+    pub async fn initiate(&mut self, peer: &SocketAddr) -> anyhow::Result<PeerStream> {
+        self.send(&peer).await?.receive().await
+    }
+
+    async fn send(&mut self, peer: &SocketAddr) -> anyhow::Result<&mut Self> {
         let mut stream = TcpStream::connect(peer)
             .await
             .context("failed to connect to peer")?;
@@ -172,7 +176,7 @@ impl HandshakeMessage {
         Ok(self)
     }
 
-    pub async fn receive(&mut self) -> anyhow::Result<PeerStream> {
+    async fn receive(&mut self) -> anyhow::Result<PeerStream> {
         if let Some(mut stream) = self.stream.take() {
             stream
                 .read_exact(&mut self.buffer)
