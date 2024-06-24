@@ -2,8 +2,7 @@ use std::env;
 
 use anyhow::{bail, Context};
 use clap::Parser;
-use http::{AnnounceRequest, AnnounceResponse};
-use lava_torrent::torrent::v1::AnnounceList;
+use http::AnnounceRequest;
 use log::{debug, error, info};
 
 mod cli;
@@ -26,14 +25,14 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("failed to read {} file", path))?;
 
     let announce_response = match torrent.tracker_protocol {
-        torrent::TrackerProtocol::UDP => {
+        torrent::TrackerProtocol::Udp => {
             let announce_response = udp::try_announce(AnnounceRequest::from(&torrent))
                 .await
                 .context("failed to get announce information for torrent")?;
             assert!(!announce_response.peers.is_empty());
             announce_response
         }
-        torrent::TrackerProtocol::TCP => {
+        torrent::TrackerProtocol::Tcp => {
             let announce_response = http::try_announce(AnnounceRequest::from(&torrent))
                 .await
                 .context("failed to get announce information for torrent")?;

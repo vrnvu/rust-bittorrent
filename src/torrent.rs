@@ -1,5 +1,4 @@
 use std::{
-    fmt::format,
     fs::{self, File},
     io::Write,
     net::SocketAddr,
@@ -17,8 +16,8 @@ use tokio::{
 const BLOCK_MAX_SIZE: u32 = 1 << 14;
 
 pub enum TrackerProtocol {
-    UDP,
-    TCP,
+    Udp,
+    Tcp,
 }
 
 pub struct Torrent {
@@ -49,9 +48,9 @@ impl Torrent {
             .to_string();
 
         let tracker_protocol = if announce_url.starts_with("udp://") {
-            TrackerProtocol::UDP
+            TrackerProtocol::Udp
         } else if announce_url.starts_with("http://") || announce_url.starts_with("https://") {
-            TrackerProtocol::TCP
+            TrackerProtocol::Tcp
         } else {
             bail!(format!("unrecognized tracker protocol: {}", announce_url))
         };
@@ -180,7 +179,7 @@ impl HandshakeMessage {
     }
 
     pub async fn initiate(&mut self, peer: &SocketAddr) -> anyhow::Result<PeerStream> {
-        self.send(&peer).await?.receive().await
+        self.send(peer).await?.receive().await
     }
 
     async fn send(&mut self, peer: &SocketAddr) -> anyhow::Result<&mut Self> {
@@ -323,8 +322,8 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_read_torrent_from_path() {
-        let path = "sample.torrent";
+    async fn test_read_http_torrent_from_path() {
+        let path = "sample-http.torrent";
 
         let torrent = Torrent::from_path(path);
         assert!(torrent.is_ok());
