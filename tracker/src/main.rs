@@ -39,9 +39,7 @@ pub async fn main() {
         .map(|announce_request: AnnounceRequest, peers_db: PeersDb| {
             let mut db = peers_db.lock().unwrap();
 
-            let peers = db
-                .entry(announce_request.info_hash.clone())
-                .or_insert_with(Vec::new);
+            let peers = db.entry(announce_request.info_hash.clone()).or_default();
 
             let peer_info = PeerInfo {
                 peer_id: announce_request.peer_id.clone(),
