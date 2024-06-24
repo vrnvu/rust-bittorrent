@@ -25,21 +25,10 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("failed to read {} file", path))?;
 
     let announce_response = match torrent.tracker_protocol {
-        torrent::TrackerProtocol::Udp => {
-            let announce_response = udp::try_announce(AnnounceRequest::from(&torrent))
-                .await
-                .context("failed to get announce information for torrent")?;
-            assert!(!announce_response.peers.is_empty());
-            announce_response
-        }
-        torrent::TrackerProtocol::Tcp => {
-            let announce_response = http::try_announce(AnnounceRequest::from(&torrent))
-                .await
-                .context("failed to get announce information for torrent")?;
-            assert!(!announce_response.peers.is_empty());
-            announce_response
-        }
-    };
+        torrent::TrackerProtocol::Udp => udp::try_announce(AnnounceRequest::from(&torrent)).await,
+        torrent::TrackerProtocol::Tcp => http::try_announce(AnnounceRequest::from(&torrent)).await,
+    }
+    .context("failed to get announce information for torrent")?;
 
     let peer = announce_response
         .peers
