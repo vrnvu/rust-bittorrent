@@ -1,4 +1,5 @@
 use std::{
+    fmt::format,
     fs::{self, File},
     io::Write,
     net::SocketAddr,
@@ -15,8 +16,15 @@ use tokio::{
 
 const BLOCK_MAX_SIZE: u32 = 1 << 14;
 
+pub enum TrackerProtocol {
+    UDP,
+    TCP,
+}
+
 pub struct Torrent {
     pub torrent: lava_torrent::torrent::v1::Torrent,
+    pub announce_url: String,
+    pub tracker_protocol: TrackerProtocol,
     pub info_hash: String,
     pub info_hash_bytes: [u8; 20],
 }
@@ -34,8 +42,24 @@ impl Torrent {
         let mut info_hash_bytes = [0u8; 20];
         info_hash_bytes.copy_from_slice(&vec_info_hash_bytes);
 
+        let announce_url = torrent
+            .announce
+            .as_ref()
+            .context("announce url was expected in torrent file")?
+            .to_string();
+
+        let tracker_protocol = if announce_url.starts_with("udp://") {
+            TrackerProtocol::UDP
+        } else if announce_url.starts_with("http://") || announce_url.starts_with("https://") {
+            TrackerProtocol::TCP
+        } else {
+            bail!(format!("unrecognized tracker protocol: {}", announce_url))
+        };
+
         Ok(Torrent {
             torrent,
+            announce_url,
+            tracker_protocol,
             info_hash,
             info_hash_bytes,
         })

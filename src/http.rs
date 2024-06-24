@@ -14,22 +14,16 @@ pub struct AnnounceRequest {
     left: i64,
 }
 
-impl TryFrom<&Torrent> for AnnounceRequest {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &Torrent) -> Result<Self, Self::Error> {
-        let announce_url = value
-            .torrent
-            .announce
-            .clone()
-            .context("announce URL is missing")?;
+impl From<&Torrent> for AnnounceRequest {
+    fn from(value: &Torrent) -> Self {
+        let announce_url = value.announce_url.to_string();
         let info_hash = value.info_hash.clone();
         let left = value.torrent.length;
-        Ok(AnnounceRequest {
+        AnnounceRequest {
             announce_url,
             info_hash,
             left,
-        })
+        }
     }
 }
 
