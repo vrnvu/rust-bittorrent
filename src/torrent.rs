@@ -294,10 +294,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_torrent_from_path() {
-        // Mock a sample.torrent file for testing
         let path = "sample.torrent";
 
-        // Test Torrent::from_path
         let torrent = Torrent::from_path(path);
         assert!(torrent.is_ok());
 
