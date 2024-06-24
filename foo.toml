@@ -1,6 +1,0 @@
-[workspace]
-members = [
-    "bt",
-    "tracker",
-]
-resolver = "2"
