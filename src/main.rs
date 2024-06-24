@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     let peer = announce_response
         .peers
         .first()
-        .expect("expected one peer at least");
+        .context("expected one peer at least")?;
 
     let mut peer_stream = torrent::HandshakeMessage::new(torrent.info_hash_bytes)
         .send(peer)
