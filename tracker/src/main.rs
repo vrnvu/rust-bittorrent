@@ -152,4 +152,87 @@ mod tests {
             .context("failed to deserialize announce response")?;
         Ok(announce_response)
     }
+
+    #[tokio::test]
+    async fn test_multiple_peers_announce() {
+        let peers_db: PeersDb = Arc::new(Mutex::new(HashMap::new()));
+        let filter = announce_filter(peers_db.clone());
+
+        let peer_1 = AnnounceRequest {
+            info_hash: "info_hash_1".to_string(),
+            peer_id: "peer1".to_string(),
+            ip: "192.168.1.2".to_string(),
+            port: 6881,
+        };
+
+        let peer_2 = AnnounceRequest {
+            info_hash: "info_hash_1".to_string(),
+            peer_id: "peer2".to_string(),
+            ip: "192.168.1.3".to_string(),
+            port: 6882,
+        };
+
+        let peer_3 = AnnounceRequest {
+            info_hash: "info_hash_2".to_string(),
+            peer_id: "peer3".to_string(),
+            ip: "192.168.1.4".to_string(),
+            port: 6883,
+        };
+
+        // Announce for peer 1
+        let response_1 = request()
+            .method("GET")
+            .path(&format!(
+                "/announce?info_hash={}&peer_id={}&ip={}&port={}",
+                peer_1.info_hash, peer_1.peer_id, peer_1.ip, peer_1.port
+            ))
+            .reply(&filter)
+            .await;
+
+        assert_eq!(response_1.status(), 200);
+
+        // Announce for peer 2
+        let response_2 = request()
+            .method("GET")
+            .path(&format!(
+                "/announce?info_hash={}&peer_id={}&ip={}&port={}",
+                peer_2.info_hash, peer_2.peer_id, peer_2.ip, peer_2.port
+            ))
+            .reply(&filter)
+            .await;
+
+        assert_eq!(response_2.status(), 200);
+
+        // Announce for peer 3
+        let response_3 = request()
+            .method("GET")
+            .path(&format!(
+                "/announce?info_hash={}&peer_id={}&ip={}&port={}",
+                peer_3.info_hash, peer_3.peer_id, peer_3.ip, peer_3.port
+            ))
+            .reply(&filter)
+            .await;
+
+        assert_eq!(response_3.status(), 200);
+
+        // Check the state of peers_db
+        let db = peers_db.lock().unwrap();
+
+        // Check peers for info_hash_1
+        let peers_info_hash_1 = db.get("info_hash_1").unwrap();
+        assert_eq!(peers_info_hash_1.len(), 2);
+        assert!(peers_info_hash_1
+            .iter()
+            .any(|peer| peer.peer_id == "peer1" && peer.ip == "192.168.1.2" && peer.port == 6881));
+        assert!(peers_info_hash_1
+            .iter()
+            .any(|peer| peer.peer_id == "peer2" && peer.ip == "192.168.1.3" && peer.port == 6882));
+
+        // Check peers for info_hash_2
+        let peers_info_hash_2 = db.get("info_hash_2").unwrap();
+        assert_eq!(peers_info_hash_2.len(), 1);
+        assert!(peers_info_hash_2
+            .iter()
+            .any(|peer| peer.peer_id == "peer3" && peer.ip == "192.168.1.4" && peer.port == 6883));
+    }
 }
