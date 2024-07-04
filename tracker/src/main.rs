@@ -27,6 +27,13 @@ pub struct PeerInfo {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct InfoHashRequest {
     pub info_hash: String,
+    pub peer_id: Option<String>,
+    pub ip: Option<String>,
+    pub port: Option<u16>,
+    pub uploaded: Option<u64>,
+    pub downloaded: Option<u64>,
+    pub left: Option<u64>,
+    pub compact: Option<u8>,
 }
 
 pub type PeersDb = Arc<Mutex<HashMap<String, Vec<PeerInfo>>>>;
@@ -240,5 +247,39 @@ mod tests {
         assert!(peers_info_hash_2
             .iter()
             .any(|peer| peer.peer_id == "peer3" && peer.ip == "192.168.1.4" && peer.port == 6883));
+    }
+
+    #[tokio::test]
+    async fn test_announce_get_with_optional_params() {
+        let peers_db: PeersDb = Arc::new(Mutex::new(HashMap::new()));
+        let filter = announce_filter(peers_db.clone());
+
+        // Add a peer
+        {
+            let mut db = peers_db.lock().unwrap();
+            db.entry("testhash".to_string())
+                .or_default()
+                .push(PeerInfo {
+                    peer_id: "testpeer".to_string(),
+                    ip: "127.0.0.1".to_string(),
+                    port: 8080,
+                });
+        }
+
+        let response = request()
+            .method("GET")
+            .path("/announce?info_hash=testhash&peer_id=00112233445566778899&port=6881&uploaded=0&downloaded=0&left=100&compact=1")
+            .reply(&filter)
+            .await;
+
+        assert_eq!(response.status(), 200);
+
+        let announce_response: AnnounceResponse =
+            serde_bencode::from_bytes(response.body()).unwrap();
+        assert_eq!(announce_response.interval, 1800);
+        assert_eq!(announce_response.peers.len(), 1);
+        assert_eq!(announce_response.peers[0].peer_id, "testpeer");
+        assert_eq!(announce_response.peers[0].ip, "127.0.0.1");
+        assert_eq!(announce_response.peers[0].port, 8080);
     }
 }
