@@ -51,7 +51,10 @@ fn handle_announce(announce_request: AnnounceRequest, peers_db: PeersDb) -> impl
     };
     let encoded = serde_bencode::to_bytes(&response).unwrap();
 
-    warp::reply::with_header(encoded, "Content-Type", "application/x-bencode")
+    warp::http::Response::builder()
+        .status(warp::http::StatusCode::OK)
+        .header("Content-Type", "application/x-bencode")
+        .body(encoded)
 }
 
 pub fn announce_filter(
