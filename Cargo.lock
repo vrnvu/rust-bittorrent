@@ -1761,9 +1761,13 @@ dependencies = [
 name = "tracker"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "reqwest",
  "serde",
+ "serde_bencode",
  "tokio",
  "warp",
+ "wiremock",
 ]
 
 [[package]]

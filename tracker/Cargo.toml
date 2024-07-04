@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.86"
 tokio = { version = "1", features = ["full"] }
 warp = "0.3.7"
 serde = { version = "1.0.203", features = ["derive"] }
+serde_bencode = "^0.2.4"
+
+[dev-dependencies]
+wiremock = "0.6.0"
+reqwest = "0.12.5"
