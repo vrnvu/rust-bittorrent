@@ -91,6 +91,12 @@ cd bt
 cargo run -- --file <path_to_torrent_file> --output_path <output_directory> [--verbose]
 ```
 
+or
+
+```sh
+cargo run --bin bt --file <path_to_torrent_file> --output_path <output_directory> [--verbose]
+```
+
 ### Running the Tracker
 
 Navigate to the `tracker` directory and start the server:
