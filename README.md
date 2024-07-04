@@ -113,5 +113,5 @@ Peers announce themselves to the tracker by sending a GET request to the `/annou
 Example using `curl`:
 
 ```sh
-curl "http://127.0.0.1:3030/announce?info_hash=12345&peer_id=peer1&ip=192.168.1.2&port=6881"
+curl -i "http://127.0.0.1:3030/announce?info_hash=12345&peer_id=peer1&ip=192.168.1.2&port=6881"
 ```
