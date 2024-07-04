@@ -27,20 +27,20 @@ A minimal BitTorrent client and tracker written in Rust, focusing on simplicity 
 #### Command-line Interface (CLI)
 
 ```sh
-bt --file <path_to_torrent_file> --output_path <output_directory> [--verbose]
+bt download --file <path_to_torrent_file> --output_path <output_directory> [--verbose]
 ```
 
 #### Examples
 
 ```sh
 # Download a torrent file with default logging and output path
-bt --file sample.torrent --output_path test.txt
+bt download --file sample.torrent --output_path test.txt
 
 # Download a torrent file with default logging and output path creating a folder
-bt --file sample.torrent --output_path test_folder/test.txt
+bt download --file sample.torrent --output_path test_folder/test.txt
 
 # Download a torrent file with verbose logging
-bt --file sample.torrent --output_path test_folder/test.txt --verbose
+bt download --file sample.torrent --output_path test_folder/test.txt --verbose
 ```
 
 ### Tracker
@@ -88,13 +88,13 @@ Navigate to the `bt` directory and run the client:
 
 ```sh
 cd bt
-cargo run -- --file <path_to_torrent_file> --output_path <output_directory> [--verbose]
+cargo run -- download --file <path_to_torrent_file> --output_path <output_directory> [--verbose]
 ```
 
 or
 
 ```sh
-cargo run --bin bt --file <path_to_torrent_file> --output_path <output_directory> [--verbose]
+cargo run --bin bt download --file <path_to_torrent_file> --output_path <output_directory> [--verbose]
 ```
 
 ### Running the Tracker

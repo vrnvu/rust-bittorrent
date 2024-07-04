@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 /// rust-bittorrent cli
 #[derive(Parser, Debug)]
@@ -8,15 +8,34 @@ use clap::Parser;
     about = "A simple BitTorrent client written in Rust."
 )]
 pub struct Cli {
-    /// Sets the path to the .torrent file to download
-    #[clap(short, long)]
-    pub file: String,
+    #[clap(subcommand)]
+    pub command: Commands,
+}
 
-    /// Sets logging to "debug" level, defaults to "info"
-    #[clap(short, long)]
-    pub verbose: bool,
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Download a file using a .torrent file
+    Download {
+        /// Sets the path to the .torrent file to download
+        #[clap(short, long)]
+        file: String,
 
-    /// Sets the output for downloaded files
-    #[clap(short, long)]
-    pub output_path: String,
+        /// Sets the output for downloaded files
+        #[clap(short, long)]
+        output_path: String,
+
+        /// Sets logging to "debug" level, defaults to "info"
+        #[clap(short, long)]
+        verbose: bool,
+    },
+    /// Upload a file directly to a peer, *custom implementation*
+    Upload {
+        /// Sets the path to file to upload
+        #[clap(short, long)]
+        file: String,
+
+        /// Sets logging to "debug" level, defaults to "info"
+        #[clap(short, long)]
+        verbose: bool,
+    },
 }

@@ -2,6 +2,7 @@ use std::env;
 
 use anyhow::{bail, Context};
 use clap::Parser;
+use cli::Commands;
 use http::AnnounceRequest;
 use log::{debug, error, info};
 
@@ -10,19 +11,16 @@ mod http;
 mod torrent;
 mod udp;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let args = cli::Cli::parse();
-    if args.verbose {
+async fn download(file: &str, output_path: &str, verbose: bool) -> anyhow::Result<()> {
+    if verbose {
         env::set_var("RUST_LOG", "debug")
     } else {
         env::set_var("RUST_LOG", "info")
     }
     env_logger::init();
 
-    let path = args.file;
-    let torrent: torrent::Torrent = torrent::Torrent::from_path(&path)
-        .with_context(|| format!("failed to read {} file", path))?;
+    let torrent: torrent::Torrent = torrent::Torrent::from_path(&file)
+        .with_context(|| format!("failed to read {} file", file))?;
 
     let announce_response = match torrent.tracker_protocol {
         torrent::TrackerProtocol::Udp => udp::try_announce(AnnounceRequest::from(&torrent)).await,
@@ -78,10 +76,36 @@ async fn main() -> anyhow::Result<()> {
     }
 
     torrent
-        .download(&mut peer_stream.stream, &args.output_path)
+        .download(&mut peer_stream.stream, &output_path)
         .await
         .context("failed to download torrent")?;
 
     info!("success");
     Ok(())
+}
+
+async fn upload(file: &str, verbose: bool) -> anyhow::Result<()> {
+    if verbose {
+        env::set_var("RUST_LOG", "debug")
+    } else {
+        env::set_var("RUST_LOG", "info")
+    }
+    env_logger::init();
+
+    info!("upload file: {}", file);
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let args = cli::Cli::parse();
+    match &args.command {
+        Commands::Download {
+            file,
+            output_path,
+            verbose,
+        } => download(file, output_path, *verbose).await,
+        Commands::Upload { file, verbose } => upload(file, *verbose).await,
+    }
 }
