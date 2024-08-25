@@ -285,11 +285,11 @@ impl PeerMessage {
             } => PeerMessage::buffer_request(*index, *begin, *length).await?,
             _ => bail!("unexpected message type"),
         };
-        self.write_buffer(&buffer, stream).await?;
+        self.write_message(&buffer, stream).await?;
         Ok(())
     }
 
-    async fn write_buffer(&self, buffer: &[u8], stream: &mut TcpStream) -> anyhow::Result<()> {
+    async fn write_message(&self, buffer: &[u8], stream: &mut TcpStream) -> anyhow::Result<()> {
         stream.write_u32(buffer.len() as u32).await?;
         stream.write_all(&buffer).await?;
         Ok(())
@@ -310,36 +310,20 @@ impl PeerMessage {
     }
 
     pub async fn receive(stream: &mut TcpStream) -> anyhow::Result<Self> {
-        let mut size = stream
-            .read_u32()
-            .await
-            .context("failed to read message size")?;
-        while size == 0 {
-            size = stream
-                .read_u32()
-                .await
-                .context("failed to read message size")?;
-        }
+        let message_size = Self::receive_message_size(stream).await?;
+        let message_tag: MessageTag = {
+            let message_tag = Self::receive_message_tag(stream).await?;
+            message_tag.try_into().with_context(|| {
+                format!("failed to convert message tag to enum: {}", message_tag)
+            })?
+        };
 
-        let tag: u8 = stream
-            .read_u8()
-            .await
-            .context("failed to read message tag")?;
-
-        let tag: MessageTag = tag
-            .try_into()
-            .with_context(|| format!("failed to convert message tag to enum: {}", tag))?;
-
-        match tag {
-            MessageTag::Unchoke => Ok(PeerMessage::Unchoke),
-            MessageTag::Interested => Ok(PeerMessage::Interested),
+        let peer_message = match message_tag {
+            MessageTag::Unchoke => PeerMessage::Unchoke,
+            MessageTag::Interested => PeerMessage::Interested,
             MessageTag::Bitfield => {
-                let mut buff = vec![0; size as usize - 1];
-                stream
-                    .read_exact(&mut buff)
-                    .await
-                    .context("failed to read Bitfield payload")?;
-                Ok(PeerMessage::Bitfield(buff))
+                let buff = Self::receive_bitfield_payload(message_size, stream).await?;
+                PeerMessage::Bitfield(buff)
             }
             MessageTag::Piece => {
                 let index = stream
@@ -350,19 +334,74 @@ impl PeerMessage {
                     .read_u32()
                     .await
                     .context("failed to read Piece begin offset")?;
-                let mut block = vec![0; size as usize - 8 - 1]; // 2 * u32 - 1
-                stream
-                    .read_exact(&mut block)
-                    .await
-                    .context("failed to read Piece block")?;
-                Ok(PeerMessage::Piece {
+                let block = Self::receive_piece_block(message_size, stream).await?;
+                PeerMessage::Piece {
                     index,
                     begin,
                     block,
-                })
+                }
             }
             _ => bail!("unexpected tag message received, not implemented yet"),
+        };
+        Ok(peer_message)
+    }
+
+    async fn receive_message_tag(stream: &mut TcpStream) -> anyhow::Result<u8> {
+        let tag = stream
+            .read_u8()
+            .await
+            .context("failed to read message tag")?;
+
+        Ok(tag)
+    }
+
+    async fn receive_message_size(stream: &mut TcpStream) -> anyhow::Result<u32> {
+        let mut size = stream
+            .read_u32()
+            .await
+            .context("failed to read message size")?;
+
+        while size == 0 {
+            size = stream
+                .read_u32()
+                .await
+                .context("failed to read message size")?;
         }
+
+        Ok(size)
+    }
+
+    async fn receive_bitfield_payload(
+        message_size: u32,
+        stream: &mut TcpStream,
+    ) -> anyhow::Result<Vec<u8>> {
+        let mut buff = vec![0; message_size as usize - 1];
+        stream
+            .read_exact(&mut buff)
+            .await
+            .context("failed to read Bitfield payload")?;
+
+        Ok(buff)
+    }
+
+    async fn receive_piece_block(
+        message_size: u32,
+        stream: &mut TcpStream,
+    ) -> anyhow::Result<Vec<u8>> {
+        // Allocate a buffer for the piece block data
+        // message_size includes:
+        // - 1 byte for the message ID
+        // - 4 bytes for the piece index
+        // - 4 bytes for the block offset
+        // - The actual block data
+        // So we subtract 9 (1 + 4 + 4) to get the size of the block data
+        let mut block = vec![0; message_size as usize - 9];
+        stream
+            .read_exact(&mut block)
+            .await
+            .context("failed to read Piece block")?;
+
+        Ok(block)
     }
 }
 
