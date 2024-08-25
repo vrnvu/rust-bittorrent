@@ -178,6 +178,7 @@ pub struct HandshakeMessage {
     stream: Option<TcpStream>,
 }
 
+// TODO: clean implementation
 impl HandshakeMessage {
     pub fn new(info_hash_bytes: [u8; 20]) -> Self {
         let peer_id: [u8; 20] = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9];
@@ -275,26 +276,37 @@ impl TryFrom<u8> for MessageTag {
 
 impl PeerMessage {
     pub async fn send(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
-        let mut buffer = Vec::new();
-        match self {
-            PeerMessage::Interested => {
-                buffer.write_u8(MessageTag::Interested as u8).await?;
-            }
+        let buffer = match self {
+            PeerMessage::Interested => PeerMessage::buffer_interested().await?,
             PeerMessage::Request {
                 index,
                 begin,
                 length,
-            } => {
-                buffer.write_u8(MessageTag::Request as u8).await?;
-                buffer.write_u32(*index).await?;
-                buffer.write_u32(*begin).await?;
-                buffer.write_u32(*length).await?;
-            }
+            } => PeerMessage::buffer_request(*index, *begin, *length).await?,
             _ => bail!("unexpected message type"),
-        }
+        };
+        self.write_buffer(&buffer, stream).await?;
+        Ok(())
+    }
+
+    async fn write_buffer(&self, buffer: &[u8], stream: &mut TcpStream) -> anyhow::Result<()> {
         stream.write_u32(buffer.len() as u32).await?;
         stream.write_all(&buffer).await?;
         Ok(())
+    }
+
+    async fn buffer_interested() -> anyhow::Result<Vec<u8>> {
+        let buffer = vec![MessageTag::Interested as u8];
+        Ok(buffer)
+    }
+
+    async fn buffer_request(index: u32, begin: u32, length: u32) -> anyhow::Result<Vec<u8>> {
+        let mut buffer = Vec::with_capacity(13); // 1 byte for tag + 3 * 4 bytes for u32 values
+        buffer.push(MessageTag::Request as u8);
+        buffer.extend_from_slice(&index.to_be_bytes());
+        buffer.extend_from_slice(&begin.to_be_bytes());
+        buffer.extend_from_slice(&length.to_be_bytes());
+        Ok(buffer)
     }
 
     pub async fn receive(stream: &mut TcpStream) -> anyhow::Result<Self> {
@@ -319,15 +331,15 @@ impl PeerMessage {
             .with_context(|| format!("failed to convert message tag to enum: {}", tag))?;
 
         match tag {
-            MessageTag::Unchoke => Ok(Self::Unchoke),
-            MessageTag::Interested => Ok(Self::Interested),
+            MessageTag::Unchoke => Ok(PeerMessage::Unchoke),
+            MessageTag::Interested => Ok(PeerMessage::Interested),
             MessageTag::Bitfield => {
                 let mut buff = vec![0; size as usize - 1];
                 stream
                     .read_exact(&mut buff)
                     .await
                     .context("failed to read Bitfield payload")?;
-                Ok(Self::Bitfield(buff))
+                Ok(PeerMessage::Bitfield(buff))
             }
             MessageTag::Piece => {
                 let index = stream
@@ -343,7 +355,7 @@ impl PeerMessage {
                     .read_exact(&mut block)
                     .await
                     .context("failed to read Piece block")?;
-                Ok(Self::Piece {
+                Ok(PeerMessage::Piece {
                     index,
                     begin,
                     block,
