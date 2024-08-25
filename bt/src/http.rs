@@ -5,7 +5,7 @@ use log::{debug, error, info};
 use serde_bytes::ByteBuf;
 use serde_derive::{Deserialize, Serialize};
 
-use crate::torrent::Torrent;
+use crate::torrent::TorrentFile;
 
 #[derive(Debug)]
 pub struct AnnounceRequest {
@@ -14,8 +14,8 @@ pub struct AnnounceRequest {
     left: i64,
 }
 
-impl From<&Torrent> for AnnounceRequest {
-    fn from(value: &Torrent) -> Self {
+impl From<&TorrentFile> for AnnounceRequest {
+    fn from(value: &TorrentFile) -> Self {
         let announce_url = value.announce_url.clone();
         let info_hash = value.info_hash.clone();
         let left = value.torrent.length;

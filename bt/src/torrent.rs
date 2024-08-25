@@ -34,7 +34,7 @@ impl TryFrom<&str> for TrackerProtocol {
     }
 }
 
-pub struct Torrent {
+pub struct TorrentFile {
     pub torrent: lava_torrent::torrent::v1::Torrent,
     pub announce_url: String,
     pub tracker_protocol: TrackerProtocol,
@@ -42,7 +42,7 @@ pub struct Torrent {
     pub info_hash_bytes: [u8; 20],
 }
 
-impl Torrent {
+impl TorrentFile {
     pub fn from_path<P>(path: P) -> anyhow::Result<Self>
     where
         P: AsRef<Path>,
@@ -66,7 +66,7 @@ impl Torrent {
 
         let tracker_protocol = TrackerProtocol::try_from(announce_url.as_str())?;
 
-        Ok(Torrent {
+        Ok(TorrentFile {
             torrent,
             announce_url,
             tracker_protocol,
@@ -459,7 +459,7 @@ mod tests {
     async fn test_read_http_torrent_from_path() {
         let path = "tests/sample-http.torrent";
 
-        let torrent = Torrent::from_path(path);
+        let torrent = TorrentFile::from_path(path);
         assert!(torrent.is_ok());
 
         assert_eq!(
