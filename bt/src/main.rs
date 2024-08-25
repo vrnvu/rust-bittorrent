@@ -6,7 +6,7 @@ use clap::Parser;
 use cli::Commands;
 use http::AnnounceRequest;
 use log::{debug, error, info, warn};
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{self};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::timeout;
 
@@ -27,16 +27,17 @@ async fn download_from_peer(file: &str, output_path: &str, verbose: bool) -> any
         .with_context(|| format!("failed to read {} file", file))?;
 
     // TODO
-    let peer_addr = "127.0.0.1:6881".parse()?;
-    let mut peer_stream = torrent::HandshakeMessage::new(torrent.info_hash_bytes)
-        .initiate(&peer_addr)
+    let peer_addr = "127.0.0.1:6881";
+    let mut stream = TcpStream::connect(peer_addr).await?;
+    let peer_id = torrent::HandshakeMessage::new(torrent.info_hash_bytes)
+        .initiate(&mut stream)
         .await
         .context("error handshake initiate with uploader")?;
 
-    info!("handshake initiated with uploader");
+    info!("handshake success with uploader, peer_id: {}", peer_id);
 
     torrent
-        .download(&mut peer_stream.stream, output_path)
+        .download(&mut stream, output_path)
         .await
         .context("failed to download torrent")?;
 
@@ -67,19 +68,12 @@ async fn download(file: &str, output_path: &str, verbose: bool) -> anyhow::Resul
         .first()
         .with_context(|| format!("expected one peer at least for torrent: {}", file))?;
 
-    let mut peer_stream = torrent::HandshakeMessage::new(torrent.info_hash_bytes)
-        .initiate(peer)
-        .await
-        .with_context(|| {
-            format!(
-                "error handshake initiate for info_hash: {} with peer: {}",
-                torrent.info_hash, peer
-            )
-        })?;
-    debug!("peer stream: {:?}", &peer_stream);
-    info!("handshake initiate with peer {}", peer_stream.peer_id);
+    let mut stream = TcpStream::connect(peer).await?;
+    let peer_id = perform_handshake(&mut stream, &torrent).await?;
 
-    match torrent::PeerMessage::receive(&mut peer_stream.stream).await? {
+    info!("handshake success with peer {}", peer_id);
+
+    match torrent::PeerMessage::receive(&mut stream).await? {
         torrent::PeerMessage::Bitfield(payload) => {
             debug!("bitfield payload: {:?}", &payload);
         }
@@ -91,12 +85,12 @@ async fn download(file: &str, output_path: &str, verbose: bool) -> anyhow::Resul
     info!("bitfield received");
 
     torrent::PeerMessage::Interested
-        .send(&mut peer_stream.stream)
+        .send(&mut stream)
         .await
         .with_context(|| "failed to send Interested")?;
     info!("interested send to peer");
 
-    match torrent::PeerMessage::receive(&mut peer_stream.stream)
+    match torrent::PeerMessage::receive(&mut stream)
         .await
         .with_context(|| "failed to receive PeerMessage")?
     {
@@ -110,7 +104,7 @@ async fn download(file: &str, output_path: &str, verbose: bool) -> anyhow::Resul
     }
 
     torrent
-        .download(&mut peer_stream.stream, output_path)
+        .download(&mut stream, output_path)
         .await
         .with_context(|| "failed to download torrent")?;
 
@@ -154,7 +148,7 @@ async fn handle_peer(mut stream: TcpStream, torrent: &torrent::TorrentFile) -> a
     info!("New peer connection established from {}", peer_addr);
 
     // Perform handshake
-    timeout(PEER_TIMEOUT, perform_handshake(&mut stream))
+    timeout(PEER_TIMEOUT, perform_handshake(&mut stream, torrent))
         .await
         .map_err(|_| anyhow::anyhow!("Handshake timed out"))??;
 
@@ -227,12 +221,19 @@ async fn handle_message(
     Ok(())
 }
 
-// TODO
-async fn perform_handshake(stream: &mut TcpStream) -> anyhow::Result<()> {
-    let mut buffer = vec![0u8; 68];
-    stream.read_exact(&mut buffer).await?;
-    stream.write_all(&buffer).await?;
-    Ok(())
+async fn perform_handshake(
+    stream: &mut TcpStream,
+    torrent: &torrent::TorrentFile,
+) -> anyhow::Result<String> {
+    torrent::HandshakeMessage::new(torrent.info_hash_bytes)
+        .initiate(stream)
+        .await
+        .with_context(|| {
+            format!(
+                "error handshake initiate for info_hash: {}",
+                torrent.info_hash
+            )
+        })
 }
 
 #[tokio::main]

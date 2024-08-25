@@ -1,7 +1,6 @@
 use std::{
     fs::{self, File},
     io::{Read, Seek, SeekFrom, Write},
-    net::SocketAddr,
     path::Path,
 };
 
@@ -182,67 +181,50 @@ impl TorrentFile {
 
 #[derive(Debug)]
 pub struct HandshakeMessage {
+    // TODO should we use PeerId instead of [u8; 20]?
     peer_id: [u8; 20],
     info_hash_bytes: [u8; 20],
-    buffer: Vec<u8>,
-    stream: Option<TcpStream>,
 }
 
-// TODO: clean implementation
 impl HandshakeMessage {
     pub fn new(info_hash_bytes: [u8; 20]) -> Self {
         let peer_id: [u8; 20] = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9];
         Self {
             peer_id,
             info_hash_bytes,
-            buffer: Vec::with_capacity(68),
-            stream: None,
         }
     }
 
-    pub async fn initiate(&mut self, peer: &SocketAddr) -> anyhow::Result<PeerStream> {
-        self.send(peer).await?.receive().await
+    pub async fn initiate(&mut self, peer_stream: &mut TcpStream) -> anyhow::Result<String> {
+        self.send(peer_stream).await?.receive(peer_stream).await
     }
 
-    async fn send(&mut self, peer: &SocketAddr) -> anyhow::Result<&mut Self> {
-        let mut stream = TcpStream::connect(peer)
-            .await
-            .context("failed to connect to peer")?;
-        self.buffer.push(19);
-        self.buffer.extend("BitTorrent protocol".as_bytes());
-        self.buffer.extend(&[0_u8; 8]);
-        self.buffer.extend(self.info_hash_bytes);
-        self.buffer.extend(self.peer_id);
-        stream
-            .write_all(&self.buffer)
+    async fn send(&mut self, peer_stream: &mut TcpStream) -> anyhow::Result<&mut Self> {
+        let mut buffer = Vec::with_capacity(68);
+        buffer.push(19);
+        buffer.extend("BitTorrent protocol".as_bytes());
+        buffer.extend(&[0_u8; 8]);
+        buffer.extend(self.info_hash_bytes);
+        buffer.extend(self.peer_id);
+
+        peer_stream
+            .write_all(&buffer)
             .await
             .context("failed to send handshake")?;
-        self.stream = Some(stream);
+
         Ok(self)
     }
 
-    async fn receive(&mut self) -> anyhow::Result<PeerStream> {
-        if let Some(mut stream) = self.stream.take() {
-            stream
-                .read_exact(&mut self.buffer)
-                .await
-                .context("failed to receive handshake")?;
-            let peer_id = &self.buffer[48..];
-            Ok(PeerStream {
-                peer_id: hex::encode(peer_id),
-                stream,
-            })
-        } else {
-            error!("stream was not initialized in Handshake");
-            bail!("stream was not initialized in Handshake");
-        }
-    }
-}
+    async fn receive(&mut self, peer_stream: &mut TcpStream) -> anyhow::Result<String> {
+        let mut buffer = [0; 68];
+        peer_stream
+            .read_exact(&mut buffer)
+            .await
+            .context("failed to receive handshake")?;
 
-#[derive(Debug)]
-pub struct PeerStream {
-    pub peer_id: String,
-    pub stream: TcpStream,
+        let peer_id = &buffer[48..];
+        Ok(hex::encode(peer_id))
+    }
 }
 
 #[derive(Debug)]
@@ -489,14 +471,15 @@ mod tests {
         let mock_info_hash_bytes = [0_u8; 20];
         let mut handshake = HandshakeMessage::new(mock_info_hash_bytes);
 
-        handshake.send(&mock_addr).await?;
+        let mut stream = TcpStream::connect(mock_addr).await?;
+        handshake.send(&mut stream).await?;
 
         // Wait for the mock peer to respond
         rx.await?;
 
-        let peer_stream = handshake.receive().await?;
+        let peer_id = handshake.receive(&mut stream).await?;
         assert_eq!(
-            peer_stream.peer_id,
+            peer_id,
             hex::encode([0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9])
         );
 
