@@ -8,6 +8,10 @@ use clap::{Parser, Subcommand};
     about = "A simple BitTorrent client written in Rust."
 )]
 pub struct Cli {
+    /// Sets logging to "debug" level, defaults to "info"
+    #[clap(short, long, global = true)]
+    pub verbose: bool,
+
     #[clap(subcommand)]
     pub command: Commands,
 }
@@ -23,10 +27,6 @@ pub enum Commands {
         /// Sets the output for downloaded files
         #[clap(short, long)]
         output_path: String,
-
-        /// Sets logging to "debug" level, defaults to "info"
-        #[clap(short, long)]
-        verbose: bool,
     },
     /// Download a file using a .torrent file
     Download {
@@ -37,19 +37,11 @@ pub enum Commands {
         /// Sets the output for downloaded files
         #[clap(short, long)]
         output_path: String,
-
-        /// Sets logging to "debug" level, defaults to "info"
-        #[clap(short, long)]
-        verbose: bool,
     },
     /// Upload a file directly to a peer, *custom implementation*
     Upload {
         /// Sets the path to file to upload
         #[clap(short, long)]
         file: String,
-
-        /// Sets logging to "debug" level, defaults to "info"
-        #[clap(short, long)]
-        verbose: bool,
     },
 }

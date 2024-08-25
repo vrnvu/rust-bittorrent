@@ -15,14 +15,7 @@ mod http;
 mod torrent;
 mod udp;
 
-async fn download_from_peer(file: &str, output_path: &str, verbose: bool) -> anyhow::Result<()> {
-    if verbose {
-        env::set_var("RUST_LOG", "debug")
-    } else {
-        env::set_var("RUST_LOG", "info")
-    }
-    env_logger::init();
-
+async fn download_from_peer(file: &str, output_path: &str) -> anyhow::Result<()> {
     let torrent: torrent::TorrentFile = torrent::TorrentFile::from_path(file)
         .with_context(|| format!("failed to read {} file", file))?;
 
@@ -46,14 +39,7 @@ async fn download_from_peer(file: &str, output_path: &str, verbose: bool) -> any
     Ok(())
 }
 
-async fn download(file: &str, output_path: &str, verbose: bool) -> anyhow::Result<()> {
-    if verbose {
-        env::set_var("RUST_LOG", "debug")
-    } else {
-        env::set_var("RUST_LOG", "info")
-    }
-    env_logger::init();
-
+async fn download(file: &str, output_path: &str) -> anyhow::Result<()> {
     let torrent: torrent::TorrentFile = torrent::TorrentFile::from_path(file)
         .with_context(|| format!("failed to read {} file", file))?;
 
@@ -112,14 +98,7 @@ async fn download(file: &str, output_path: &str, verbose: bool) -> anyhow::Resul
     Ok(())
 }
 
-async fn upload(file: &str, verbose: bool) -> anyhow::Result<()> {
-    if verbose {
-        env::set_var("RUST_LOG", "debug")
-    } else {
-        env::set_var("RUST_LOG", "info")
-    }
-    env_logger::init();
-
+async fn upload(file: &str) -> anyhow::Result<()> {
     info!("starting uploader for file: {}", file);
 
     // TODO
@@ -239,17 +218,16 @@ async fn perform_handshake(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = cli::Cli::parse();
+    if args.verbose {
+        env::set_var("RUST_LOG", "debug")
+    } else {
+        env::set_var("RUST_LOG", "info")
+    }
+    env_logger::init();
+
     match &args.command {
-        Commands::Download {
-            file,
-            output_path,
-            verbose,
-        } => download(file, output_path, *verbose).await,
-        Commands::Upload { file, verbose } => upload(file, *verbose).await,
-        Commands::DownloadPeer {
-            file,
-            output_path,
-            verbose,
-        } => download_from_peer(file, output_path, *verbose).await,
+        Commands::Download { file, output_path } => download(file, output_path).await,
+        Commands::Upload { file } => upload(file).await,
+        Commands::DownloadPeer { file, output_path } => download_from_peer(file, output_path).await,
     }
 }
