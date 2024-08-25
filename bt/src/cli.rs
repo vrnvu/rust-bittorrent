@@ -14,6 +14,20 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Download a file from a peer
+    DownloadPeer {
+        /// Sets the path to the .torrent file to download
+        #[clap(short, long)]
+        file: String,
+
+        /// Sets the output for downloaded files
+        #[clap(short, long)]
+        output_path: String,
+
+        /// Sets logging to "debug" level, defaults to "info"
+        #[clap(short, long)]
+        verbose: bool,
+    },
     /// Download a file using a .torrent file
     Download {
         /// Sets the path to the .torrent file to download

@@ -1,15 +1,46 @@
-use std::env;
+use std::{env, sync::Arc};
 
 use anyhow::{bail, Context};
 use clap::Parser;
 use cli::Commands;
 use http::AnnounceRequest;
 use log::{debug, error, info};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 
 mod cli;
 mod http;
 mod torrent;
 mod udp;
+
+async fn download_from_peer(file: &str, output_path: &str, verbose: bool) -> anyhow::Result<()> {
+    if verbose {
+        env::set_var("RUST_LOG", "debug")
+    } else {
+        env::set_var("RUST_LOG", "info")
+    }
+    env_logger::init();
+
+    let torrent: torrent::Torrent = torrent::Torrent::from_path(file)
+        .with_context(|| format!("failed to read {} file", file))?;
+
+    let peer_addr = "127.0.0.1:6881".parse()?;
+    let mut peer_stream = torrent::HandshakeMessage::new(torrent.info_hash_bytes)
+        .initiate(&peer_addr)
+        .await
+        .context("error handshake initiate with uploader")?;
+
+    info!("handshake initiated with uploader");
+
+    torrent
+        .download(&mut peer_stream.stream, output_path)
+        .await
+        .context("failed to download torrent")?;
+
+    info!("download completed successfully");
+
+    Ok(())
+}
 
 async fn download(file: &str, output_path: &str, verbose: bool) -> anyhow::Result<()> {
     if verbose {
@@ -19,7 +50,7 @@ async fn download(file: &str, output_path: &str, verbose: bool) -> anyhow::Resul
     }
     env_logger::init();
 
-    let torrent: torrent::Torrent = torrent::Torrent::from_path(&file)
+    let torrent: torrent::Torrent = torrent::Torrent::from_path(file)
         .with_context(|| format!("failed to read {} file", file))?;
 
     let announce_response = match torrent.tracker_protocol {
@@ -76,7 +107,7 @@ async fn download(file: &str, output_path: &str, verbose: bool) -> anyhow::Resul
     }
 
     torrent
-        .download(&mut peer_stream.stream, &output_path)
+        .download(&mut peer_stream.stream, output_path)
         .await
         .with_context(|| "failed to download torrent")?;
 
@@ -92,9 +123,71 @@ async fn upload(file: &str, verbose: bool) -> anyhow::Result<()> {
     }
     env_logger::init();
 
-    info!("upload file: {}", file);
+    info!("starting uploader for file: {}", file);
+
+    let torrent = torrent::Torrent::from_path("sample-http.torrent")?;
+    let listener = TcpListener::bind("127.0.0.1:6881").await?;
+    info!("Uploader listening on 127.0.0.1:6881");
+    let torrent = Arc::new(torrent);
+
+    while let Ok((mut stream, _)) = listener.accept().await {
+        let torrent_ref = Arc::clone(&torrent);
+        tokio::spawn(async move {
+            if let Err(e) = handle_peer(&mut stream, &torrent_ref).await {
+                error!("Error handling peer: {:?}", e);
+            }
+        });
+    }
 
     Ok(())
+}
+
+async fn handle_peer(stream: &mut TcpStream, torrent: &torrent::Torrent) -> anyhow::Result<()> {
+    // Perform handshake
+    let mut buffer = vec![0u8; 68];
+    stream.read_exact(&mut buffer).await?;
+    stream.write_all(&buffer).await?;
+
+    // Read and respond to requests
+    Ok(loop {
+        match torrent::PeerMessage::receive(stream).await {
+            Ok(message) => match message {
+                torrent::PeerMessage::Request {
+                    index,
+                    begin,
+                    length,
+                } => {
+                    let piece = torrent.read_piece(index, begin, length).await?;
+                    torrent::PeerMessage::Piece {
+                        index,
+                        begin,
+                        block: piece,
+                    }
+                    .send(stream)
+                    .await?;
+                }
+                _ => {
+                    error!(
+                        "unexpected message type: {:?}, not implemented yet",
+                        message
+                    );
+                    bail!(
+                        "unexpected message type: {:?}, not implemented yet",
+                        message
+                    );
+                }
+            },
+            Err(e) => {
+                if e.to_string().contains("UnexpectedEof") {
+                    info!("Peer disconnected");
+                    break;
+                } else {
+                    error!("Error receiving message: {:?}", e);
+                    return Err(e);
+                }
+            }
+        }
+    })
 }
 
 #[tokio::main]
@@ -107,5 +200,10 @@ async fn main() -> anyhow::Result<()> {
             verbose,
         } => download(file, output_path, *verbose).await,
         Commands::Upload { file, verbose } => upload(file, *verbose).await,
+        Commands::DownloadPeer {
+            file,
+            output_path,
+            verbose,
+        } => download_from_peer(file, output_path, *verbose).await,
     }
 }

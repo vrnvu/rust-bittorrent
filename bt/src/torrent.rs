@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File},
-    io::Write,
+    io::{Read, Seek, SeekFrom, Write},
     net::SocketAddr,
     path::Path,
 };
@@ -168,6 +168,16 @@ impl Torrent {
 
         Ok(())
     }
+
+    pub async fn read_piece(&self, index: u32, begin: u32, length: u32) -> anyhow::Result<Vec<u8>> {
+        let file_path = "test.txt"; // Hardcoded for simplicity
+        let mut file = File::open(file_path)?;
+        let offset = (index as u64 * self.torrent.piece_length as u64) + begin as u64;
+        file.seek(SeekFrom::Start(offset))?;
+        let mut buffer = vec![0u8; length as usize];
+        file.read_exact(&mut buffer)?;
+        Ok(buffer)
+    }
 }
 
 #[derive(Debug)]
@@ -251,6 +261,8 @@ pub enum PeerMessage {
         block: Vec<u8>,
     },
 }
+
+#[derive(Debug)]
 enum MessageTag {
     Unchoke = 1,
     Interested = 2,
@@ -283,7 +295,12 @@ impl PeerMessage {
                 begin,
                 length,
             } => PeerMessage::buffer_request(*index, *begin, *length).await?,
-            _ => bail!("unexpected message type"),
+            PeerMessage::Piece {
+                index,
+                begin,
+                block,
+            } => PeerMessage::buffer_piece(*index, *begin, block).await?,
+            _ => bail!("unexpected message type: {:?}, not implemented yet", self),
         };
         self.write_message(&buffer, stream).await?;
         Ok(())
@@ -291,8 +308,17 @@ impl PeerMessage {
 
     async fn write_message(&self, buffer: &[u8], stream: &mut TcpStream) -> anyhow::Result<()> {
         stream.write_u32(buffer.len() as u32).await?;
-        stream.write_all(&buffer).await?;
+        stream.write_all(buffer).await?;
         Ok(())
+    }
+
+    async fn buffer_piece(index: u32, begin: u32, block: &[u8]) -> anyhow::Result<Vec<u8>> {
+        let mut buffer = Vec::with_capacity(9 + block.len()); // 1 byte for tag + 2 * 4 bytes for u32 values + block length
+        buffer.push(MessageTag::Piece as u8);
+        buffer.extend_from_slice(&index.to_be_bytes());
+        buffer.extend_from_slice(&begin.to_be_bytes());
+        buffer.extend_from_slice(block);
+        Ok(buffer)
     }
 
     async fn buffer_interested() -> anyhow::Result<Vec<u8>> {
@@ -341,7 +367,25 @@ impl PeerMessage {
                     block,
                 }
             }
-            _ => bail!("unexpected tag message received, not implemented yet"),
+            MessageTag::Request => {
+                let index = stream
+                    .read_u32()
+                    .await
+                    .context("failed to read Piece index")?;
+                let begin = stream
+                    .read_u32()
+                    .await
+                    .context("failed to read Piece begin offset")?;
+                let length = stream
+                    .read_u32()
+                    .await
+                    .context("failed to read Piece length")?;
+                PeerMessage::Request {
+                    index,
+                    begin,
+                    length,
+                }
+            }
         };
         Ok(peer_message)
     }
