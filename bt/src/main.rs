@@ -26,12 +26,12 @@ async fn download(file: &str, output_path: &str, verbose: bool) -> anyhow::Resul
         torrent::TrackerProtocol::Udp => udp::try_announce(AnnounceRequest::from(&torrent)).await,
         torrent::TrackerProtocol::Tcp => http::try_announce(AnnounceRequest::from(&torrent)).await,
     }
-    .context("failed to get announce information for torrent")?;
+    .with_context(|| format!("failed to get announce information for torrent: {}", file))?;
 
     let peer = announce_response
         .peers
         .first()
-        .context("expected one peer at least")?;
+        .with_context(|| format!("expected one peer at least for torrent: {}", file))?;
 
     let mut peer_stream = torrent::HandshakeMessage::new(torrent.info_hash_bytes)
         .initiate(peer)
@@ -59,12 +59,12 @@ async fn download(file: &str, output_path: &str, verbose: bool) -> anyhow::Resul
     torrent::PeerMessage::Interested
         .send(&mut peer_stream.stream)
         .await
-        .context("failed to send Interested")?;
+        .with_context(|| "failed to send Interested")?;
     info!("interested send to peer");
 
     match torrent::PeerMessage::receive(&mut peer_stream.stream)
         .await
-        .context("failed to receive PeerMessage")?
+        .with_context(|| "failed to receive PeerMessage")?
     {
         torrent::PeerMessage::Unchoke => {
             debug!("unchoke received");
@@ -78,7 +78,7 @@ async fn download(file: &str, output_path: &str, verbose: bool) -> anyhow::Resul
     torrent
         .download(&mut peer_stream.stream, &output_path)
         .await
-        .context("failed to download torrent")?;
+        .with_context(|| "failed to download torrent")?;
 
     info!("success");
     Ok(())

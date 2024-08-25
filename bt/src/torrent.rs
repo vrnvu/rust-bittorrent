@@ -20,6 +20,20 @@ pub enum TrackerProtocol {
     Tcp,
 }
 
+impl TryFrom<&str> for TrackerProtocol {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value.starts_with("udp://") {
+            Ok(TrackerProtocol::Udp)
+        } else if value.starts_with("http://") || value.starts_with("https://") {
+            Ok(TrackerProtocol::Tcp)
+        } else {
+            anyhow::bail!("unrecognized tracker protocol: {}", value)
+        }
+    }
+}
+
 pub struct Torrent {
     pub torrent: lava_torrent::torrent::v1::Torrent,
     pub announce_url: String,
@@ -33,13 +47,16 @@ impl Torrent {
     where
         P: AsRef<Path>,
     {
-        let torrent = lava_torrent::torrent::v1::Torrent::read_from_file(path)
-            .context("cannot read torrent from file")?;
+        let torrent =
+            lava_torrent::torrent::v1::Torrent::read_from_file(&path).with_context(|| {
+                format!("cannot read torrent from file: {}", path.as_ref().display())
+            })?;
 
         let vec_info_hash_bytes = torrent.info_hash_bytes();
         let info_hash: String = form_urlencoded::byte_serialize(&vec_info_hash_bytes).collect();
-        let mut info_hash_bytes = [0u8; 20];
-        info_hash_bytes.copy_from_slice(&vec_info_hash_bytes);
+        let info_hash_bytes: [u8; 20] = vec_info_hash_bytes
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Expected info hash to be exactly 20 bytes"))?;
 
         let announce_url = torrent
             .announce
@@ -47,13 +64,7 @@ impl Torrent {
             .context("announce url was expected in torrent file")?
             .to_string();
 
-        let tracker_protocol = if announce_url.starts_with("udp://") {
-            TrackerProtocol::Udp
-        } else if announce_url.starts_with("http://") || announce_url.starts_with("https://") {
-            TrackerProtocol::Tcp
-        } else {
-            bail!(format!("unrecognized tracker protocol: {}", announce_url))
-        };
+        let tracker_protocol = TrackerProtocol::try_from(announce_url.as_str())?;
 
         Ok(Torrent {
             torrent,
@@ -239,25 +250,47 @@ pub enum PeerMessage {
         block: Vec<u8>,
     },
 }
+enum MessageTag {
+    Unchoke = 1,
+    Interested = 2,
+    Bitfield = 5,
+    Request = 6,
+    Piece = 7,
+}
+
+impl TryFrom<u8> for MessageTag {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Unchoke),
+            2 => Ok(Self::Interested),
+            5 => Ok(Self::Bitfield),
+            6 => Ok(Self::Request),
+            7 => Ok(Self::Piece),
+            _ => panic!("invalid message tag"),
+        }
+    }
+}
 
 impl PeerMessage {
     pub async fn send(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
         let mut buffer = Vec::new();
         match self {
             PeerMessage::Interested => {
-                buffer.write_u8(2).await?;
+                buffer.write_u8(MessageTag::Interested as u8).await?;
             }
             PeerMessage::Request {
                 index,
                 begin,
                 length,
             } => {
-                buffer.write_u8(6).await?;
+                buffer.write_u8(MessageTag::Request as u8).await?;
                 buffer.write_u32(*index).await?;
                 buffer.write_u32(*begin).await?;
                 buffer.write_u32(*length).await?;
             }
-            _ => todo!(),
+            _ => bail!("unexpected message type"),
         }
         stream.write_u32(buffer.len() as u32).await?;
         stream.write_all(&buffer).await?;
@@ -276,13 +309,19 @@ impl PeerMessage {
                 .context("failed to read message size")?;
         }
 
-        let tag = stream
+        let tag: u8 = stream
             .read_u8()
             .await
             .context("failed to read message tag")?;
+
+        let tag: MessageTag = tag
+            .try_into()
+            .with_context(|| format!("failed to convert message tag to enum: {}", tag))?;
+
         match tag {
-            1 => Ok(Self::Unchoke),
-            5 => {
+            MessageTag::Unchoke => Ok(Self::Unchoke),
+            MessageTag::Interested => Ok(Self::Interested),
+            MessageTag::Bitfield => {
                 let mut buff = vec![0; size as usize - 1];
                 stream
                     .read_exact(&mut buff)
@@ -290,7 +329,7 @@ impl PeerMessage {
                     .context("failed to read Bitfield payload")?;
                 Ok(Self::Bitfield(buff))
             }
-            7 => {
+            MessageTag::Piece => {
                 let index = stream
                     .read_u32()
                     .await

@@ -16,7 +16,7 @@ pub struct AnnounceRequest {
 
 impl From<&Torrent> for AnnounceRequest {
     fn from(value: &Torrent) -> Self {
-        let announce_url = value.announce_url.to_string();
+        let announce_url = value.announce_url.clone();
         let info_hash = value.info_hash.clone();
         let left = value.torrent.length;
         AnnounceRequest {
@@ -40,8 +40,8 @@ struct AnnounceResponseRaw {
     peers: ByteBuf,
 }
 
-impl From<AnnounceResponseRaw> for AnnounceResponse {
-    fn from(value: AnnounceResponseRaw) -> Self {
+impl From<&AnnounceResponseRaw> for AnnounceResponse {
+    fn from(value: &AnnounceResponseRaw) -> Self {
         let mut peers = Vec::new();
         for chunk in value.peers.chunks(6) {
             let ip = Ipv4Addr::new(chunk[0], chunk[1], chunk[2], chunk[3]);
@@ -83,7 +83,7 @@ pub async fn try_announce(request: AnnounceRequest) -> anyhow::Result<AnnounceRe
         let resp = serde_bencode::de::from_bytes::<AnnounceResponseRaw>(&bytes)
             .context("failed to deserialize announce response")?;
         debug!("announce response: {:?}", resp);
-        Ok(AnnounceResponse::from(resp))
+        Ok(AnnounceResponse::from(&resp))
     } else {
         let status = r.status();
         error!("announce request failed with status: {}", status);
