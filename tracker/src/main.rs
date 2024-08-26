@@ -1,10 +1,15 @@
+use anyhow::Context;
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::env::{self, args};
 use std::sync::{Arc, RwLock};
+use warp::filters::body::bytes;
 use warp::Filter;
 
+// TODO this is the same as the one in bt/src/http.rs
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct AnnounceRequest {
+pub struct RegisterRequest {
     pub info_hash: String,
     pub peer_id: String,
     pub ip: String,
@@ -71,7 +76,7 @@ pub fn announce_filter(
     let post = warp::path("announce")
         .and(warp::post())
         .and(with_peers_db(peers_db.clone()))
-        .and(warp::body::json::<AnnounceRequest>())
+        .and(warp::body::bytes())
         .map(handle_announce_post);
 
     get.or(post)
@@ -106,6 +111,7 @@ fn handle_announce_get(peers_db: PeersDb, info_hash_request: InfoHashRequest) ->
                 ))
         }
     };
+    debug!("response: {:?}", response);
 
     let encoded = match serde_bencode::to_string(&response) {
         Ok(encoded) => encoded,
@@ -122,7 +128,17 @@ fn handle_announce_get(peers_db: PeersDb, info_hash_request: InfoHashRequest) ->
         .body(encoded)
 }
 
-fn handle_announce_post(peers_db: PeersDb, announce_request: AnnounceRequest) -> impl warp::Reply {
+fn handle_announce_post(peers_db: PeersDb, body: bytes::Bytes) -> impl warp::Reply {
+    let announce_register: RegisterRequest = match serde_bencode::from_bytes(&body) {
+        Ok(request) => request,
+        Err(e) => {
+            return warp::http::Response::builder()
+                .status(warp::http::StatusCode::BAD_REQUEST)
+                .body(format!("Invalid bencode data: {}", e));
+        }
+    };
+    info!("Received announce post request: {:?}", announce_register);
+
     let mut db = match peers_db.write() {
         Ok(db) => db,
         Err(e) => {
@@ -132,13 +148,14 @@ fn handle_announce_post(peers_db: PeersDb, announce_request: AnnounceRequest) ->
         }
     };
 
-    db.entry(announce_request.info_hash)
+    db.entry(announce_register.info_hash.clone())
         .or_default()
         .push(PeerInfo {
-            peer_id: announce_request.peer_id,
-            ip: announce_request.ip,
-            port: announce_request.port,
+            peer_id: announce_register.peer_id.clone(),
+            ip: announce_register.ip.clone(),
+            port: announce_register.port,
         });
+    debug!("peer added to db: {:?}", announce_register);
 
     warp::http::Response::builder()
         .status(warp::http::StatusCode::NO_CONTENT)
@@ -152,10 +169,24 @@ fn with_peers_db(
 }
 
 #[tokio::main]
-pub async fn main() {
+pub async fn main() -> anyhow::Result<()> {
+    if args().len() != 2 {
+        return Err(anyhow::anyhow!("Usage: tracker <port>"));
+    }
+    let port = args()
+        .nth(1)
+        .unwrap()
+        .parse::<u16>()
+        .context("Invalid port")?;
+
+    env::set_var("RUST_LOG", "debug");
+    env_logger::init();
+
     let peers_db = PeersDb::new();
     let announce = announce_filter(&peers_db);
-    warp::serve(announce).run(([127, 0, 0, 1], 3030)).await;
+    warp::serve(announce).run(([127, 0, 0, 1], port)).await;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -222,7 +253,7 @@ mod tests {
         let peers_db = PeersDb::new();
         let filter = announce_filter(&peers_db);
 
-        let announce_request = AnnounceRequest {
+        let announce_register = RegisterRequest {
             info_hash: "info_hash_1".to_string(),
             peer_id: "peer1".to_string(),
             ip: "127.0.0.1".to_string(),
@@ -232,7 +263,7 @@ mod tests {
         let response = request()
             .method("POST")
             .path("/announce")
-            .json(&announce_request)
+            .json(&announce_register)
             .reply(&filter)
             .await;
         assert_eq!(response.status(), warp::http::StatusCode::NO_CONTENT);
@@ -251,21 +282,21 @@ mod tests {
         let peers_db = PeersDb::new();
         let filter = announce_filter(&peers_db);
 
-        let peer_1 = AnnounceRequest {
+        let peer_1 = RegisterRequest {
             info_hash: "info_hash_1".to_string(),
             peer_id: "peer1".to_string(),
             ip: "192.168.1.2".to_string(),
             port: 6881,
         };
 
-        let peer_2 = AnnounceRequest {
+        let peer_2 = RegisterRequest {
             info_hash: "info_hash_1".to_string(),
             peer_id: "peer2".to_string(),
             ip: "192.168.1.3".to_string(),
             port: 6882,
         };
 
-        let peer_3 = AnnounceRequest {
+        let peer_3 = RegisterRequest {
             info_hash: "info_hash_2".to_string(),
             peer_id: "peer3".to_string(),
             ip: "192.168.1.4".to_string(),

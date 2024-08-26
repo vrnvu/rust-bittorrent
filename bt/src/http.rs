@@ -1,13 +1,21 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use log::{debug, error, info};
 use serde_bytes::ByteBuf;
 use serde_derive::{Deserialize, Serialize};
 
 use crate::torrent::TorrentFile;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Clone)]
+pub struct RegisterRequest {
+    pub info_hash: String,
+    pub peer_id: String,
+    pub ip: String,
+    pub port: u16,
+}
+
+#[derive(Debug, Serialize)]
 pub struct AnnounceRequest {
     announce_url: String,
     info_hash: String,
@@ -87,7 +95,46 @@ pub async fn try_announce(request: AnnounceRequest) -> anyhow::Result<AnnounceRe
     } else {
         let status = r.status();
         error!("announce request failed with status: {}", status);
-        bail!("announce request failed with status: {}", status);
+        Err(anyhow::anyhow!(
+            "announce request failed with status: {}",
+            status
+        ))
+    }
+}
+
+pub async fn try_register(torrent: &TorrentFile) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
+
+    let announce_url = torrent.announce_url.clone();
+    let info_hash = torrent.info_hash.clone();
+    let url = format!("{announce_url}/announce");
+
+    let register_request = RegisterRequest {
+        info_hash,
+        peer_id: "33333333336666666666".to_string(), // TODO peer_id
+        ip: "127.0.0.1".to_string(),
+        port: 6881,
+    };
+    info!("sending register request {:?} to {url}", register_request);
+
+    let body = serde_bencode::to_bytes(&register_request)?;
+    let response = client
+        .post(&url)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body)
+        .send()
+        .await
+        .with_context(|| format!("failed to send request to {}", url))?;
+
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        let status = response.status();
+        error!("register request failed with status: {}", status);
+        Err(anyhow::anyhow!(
+            "register request failed with status: {}",
+            status
+        ))
     }
 }
 

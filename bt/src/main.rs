@@ -103,10 +103,13 @@ async fn download(file: &str, output_path: &str) -> anyhow::Result<()> {
 async fn upload(file: &str) -> anyhow::Result<()> {
     info!("starting uploader for file: {}", file);
 
-    // TODO
-    let torrent = torrent::TorrentFile::from_path("sample-http.torrent")?;
+    // TODO we need to announce ourselves to the tracker because we have this file
+    let tracker_port = 9999;
+    let torrent = torrent::TorrentFile::try_as_torrent_file(file, tracker_port)?;
+    http::try_register(&torrent).await?;
+
     let listener = TcpListener::bind("127.0.0.1:6881").await?;
-    info!("Uploader listening on 127.0.0.1:6881");
+    info!("Uploader listening on {}", listener.local_addr()?);
     let torrent = Arc::new(torrent);
 
     while let Ok((stream, _)) = listener.accept().await {

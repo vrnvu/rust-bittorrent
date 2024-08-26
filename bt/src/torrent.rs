@@ -43,6 +43,47 @@ pub struct TorrentFile {
 }
 
 impl TorrentFile {
+    pub fn try_as_torrent_file<P>(path: P, tracker_port: u16) -> anyhow::Result<Self>
+    where
+        P: AsRef<Path>,
+    {
+        const PIECE_LENGTH: i64 = 32 * 1024; // n * 1024 KiB
+
+        let host = "127.0.0.1";
+        let port = tracker_port;
+        let announce_url = format!("http://{}:{}", host, port);
+
+        let torrent = TorrentBuilder::new(&path, PIECE_LENGTH)
+            .set_announce(Some(announce_url.to_owned()))
+            .add_extra_field(
+                "encoding".to_owned(),
+                BencodeElem::String("UTF-8".to_owned()),
+            )
+            .build()?;
+
+        let vec_info_hash_bytes = torrent.info_hash_bytes();
+        let info_hash: String = form_urlencoded::byte_serialize(&vec_info_hash_bytes).collect();
+        let info_hash_bytes: [u8; 20] = vec_info_hash_bytes
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Expected info hash to be exactly 20 bytes"))?;
+
+        let announce_url = torrent
+            .announce
+            .as_ref()
+            .context("announce url was expected in torrent file")?
+            .to_string();
+
+        let tracker_protocol = TrackerProtocol::try_from(announce_url.as_str())?;
+
+        Ok(TorrentFile {
+            torrent,
+            announce_url,
+            tracker_protocol,
+            info_hash,
+            info_hash_bytes,
+        })
+    }
+
     // TODO
     #[allow(dead_code)]
     fn write_torrent_file<P>(path: P, output_path: P) -> anyhow::Result<()>
@@ -51,8 +92,9 @@ impl TorrentFile {
     {
         const PIECE_LENGTH: i64 = 32 * 1024; // n * 1024 KiB
 
-        let host = "localhost";
-        let port = 6969;
+        // TODO
+        let host = "127.0.0.1";
+        let port = 9999;
         let announce_url = format!("http://{}:{}", host, port);
 
         TorrentBuilder::new(&path, PIECE_LENGTH)
