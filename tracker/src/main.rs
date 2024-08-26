@@ -57,12 +57,6 @@ impl PeersDb {
             .write()
             .map_err(|_| anyhow::anyhow!("failed to lock peers db"))
     }
-
-    pub fn clone(&self) -> Self {
-        PeersDb {
-            inner: Arc::clone(&self.inner),
-        }
-    }
 }
 
 pub fn announce_filter(
