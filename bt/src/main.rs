@@ -4,6 +4,8 @@ use std::{env, sync::Arc};
 use anyhow::{bail, Context};
 use clap::Parser;
 use cli::Commands;
+use dialoguer::theme::ColorfulTheme;
+use dialoguer::{Confirm, FuzzySelect, Input, Select};
 use http::AnnounceRequest;
 use log::{debug, error, info, warn};
 use tokio::io::{self};
@@ -229,5 +231,38 @@ async fn main() -> anyhow::Result<()> {
         Commands::Download { file, output_path } => download(file, output_path).await,
         Commands::Upload { file } => upload(file).await,
         Commands::DownloadPeer { file, output_path } => download_from_peer(file, output_path).await,
+        Commands::Interactive => {
+            let files = vec!["file1.txt", "file2.txt", "file3.txt"];
+
+            let selected_file = FuzzySelect::with_theme(&ColorfulTheme::default())
+                .with_prompt("Select a file to download from available peers")
+                .default(0)
+                .items(&files[..])
+                .interact()
+                .unwrap();
+
+            let default_output_path: String = match files.get(selected_file) {
+                Some(file) => file.to_string(),
+                None => {
+                    return Err(anyhow::anyhow!("selected file invalid"));
+                }
+            };
+
+            let output_path: String = Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("The file will be downloaded in your current directory as")
+                .default(default_output_path)
+                .interact_text()?;
+
+            match Confirm::with_theme(&ColorfulTheme::default())
+                .with_prompt(format!(
+                    "Do you want to download file: {} and save it as {}?",
+                    files[selected_file], output_path
+                ))
+                .interact()?
+            {
+                true => download_from_peer(&files[selected_file], &output_path).await,
+                false => return Ok(()),
+            }
+        }
     }
 }

@@ -169,12 +169,15 @@ impl TorrentFile {
     }
 
     pub async fn read_piece(&self, index: u32, begin: u32, length: u32) -> anyhow::Result<Vec<u8>> {
+        // TODO
         let file_path = "test.txt"; // Hardcoded for simplicity
         let mut file = File::open(file_path)?;
+
         let offset = (index as u64 * self.torrent.piece_length as u64) + begin as u64;
         file.seek(SeekFrom::Start(offset))?;
         let mut buffer = vec![0u8; length as usize];
         file.read_exact(&mut buffer)?;
+
         Ok(buffer)
     }
 }

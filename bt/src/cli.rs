@@ -44,4 +44,6 @@ pub enum Commands {
         #[clap(short, long)]
         file: String,
     },
+    /// Interactive mode
+    Interactive, // TODO: we need a download interactive session and upload mode
 }
