@@ -175,6 +175,7 @@ dependencies = [
  "serde_bytes",
  "serde_derive",
  "sha1",
+ "tempfile",
  "tokio",
  "tokio-macros",
  "wiremock",

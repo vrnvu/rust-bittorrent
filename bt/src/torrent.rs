@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{bail, Context, Ok};
+use lava_torrent::{bencode::BencodeElem, torrent::v1::TorrentBuilder};
 use log::{debug, error, info};
 use sha1::{Digest, Sha1};
 use tokio::{
@@ -42,6 +43,29 @@ pub struct TorrentFile {
 }
 
 impl TorrentFile {
+    // TODO
+    #[allow(dead_code)]
+    fn write_torrent_file<P>(path: P, output_path: P) -> anyhow::Result<()>
+    where
+        P: AsRef<Path>,
+    {
+        const PIECE_LENGTH: i64 = 32 * 1024; // n * 1024 KiB
+
+        let host = "localhost";
+        let port = 6969;
+        let announce_url = format!("http://{}:{}", host, port);
+
+        TorrentBuilder::new(&path, PIECE_LENGTH)
+            .set_announce(Some(announce_url.to_owned()))
+            .add_extra_field(
+                "encoding".to_owned(),
+                BencodeElem::String("UTF-8".to_owned()),
+            )
+            .build()?
+            .write_into_file(output_path)
+            .with_context(|| format!("cannot write file as .torrent: {}", path.as_ref().display()))
+    }
+
     pub fn from_path<P>(path: P) -> anyhow::Result<Self>
     where
         P: AsRef<Path>,
@@ -439,6 +463,21 @@ mod tests {
     use tokio::{net::TcpListener, sync::oneshot};
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_write_torrent_file() {
+        let path = "tests/test-file.txt";
+        let temporal_file = tempfile::NamedTempFile::new().unwrap();
+        let output_path = temporal_file.path().to_str().unwrap();
+        let torrent = TorrentFile::write_torrent_file(path, output_path);
+        match torrent {
+            Err(e) => {
+                println!("Error: {:?}", e);
+                assert!(false);
+            }
+            _ => assert!(true),
+        }
+    }
 
     #[tokio::test]
     async fn test_read_http_torrent_from_path() {

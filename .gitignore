@@ -1,4 +1,5 @@
 /target
 .DS_Store
-*.txt
 sample-udp.torrent
+*.txt
+!bt/tests/test-file.txt

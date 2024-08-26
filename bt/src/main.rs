@@ -5,7 +5,7 @@ use anyhow::{bail, Context};
 use clap::Parser;
 use cli::Commands;
 use dialoguer::theme::ColorfulTheme;
-use dialoguer::{Confirm, FuzzySelect, Input, Select};
+use dialoguer::{Confirm, FuzzySelect, Input};
 use http::AnnounceRequest;
 use log::{debug, error, info, warn};
 use tokio::io::{self};
@@ -232,7 +232,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Upload { file } => upload(file).await,
         Commands::DownloadPeer { file, output_path } => download_from_peer(file, output_path).await,
         Commands::Interactive => {
-            let files = vec!["file1.txt", "file2.txt", "file3.txt"];
+            let files = ["file1.txt", "file2.txt", "file3.txt"];
 
             let selected_file = FuzzySelect::with_theme(&ColorfulTheme::default())
                 .with_prompt("Select a file to download from available peers")
@@ -260,7 +260,7 @@ async fn main() -> anyhow::Result<()> {
                 ))
                 .interact()?
             {
-                true => download_from_peer(&files[selected_file], &output_path).await,
+                true => download_from_peer(files[selected_file], &output_path).await,
                 false => return Ok(()),
             }
         }
