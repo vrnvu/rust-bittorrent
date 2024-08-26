@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use warp::Filter;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -36,27 +36,91 @@ pub struct InfoHashRequest {
     pub compact: Option<u8>,
 }
 
-pub type PeersDb = Arc<Mutex<HashMap<String, Vec<PeerInfo>>>>;
-
-fn with_peers_db(
-    peers_db: PeersDb,
-) -> impl Filter<Extract = (PeersDb,), Error = std::convert::Infallible> + Clone {
-    warp::any().map(move || peers_db.clone())
+#[derive(Debug, Default, Clone)]
+pub struct PeersDb {
+    inner: Arc<RwLock<HashMap<String, Vec<PeerInfo>>>>,
 }
 
-fn handle_announce_get(info_hash_request: InfoHashRequest, peers_db: PeersDb) -> impl warp::Reply {
-    let db = peers_db.lock().unwrap();
-    let peers = db
-        .get(&info_hash_request.info_hash)
-        .cloned()
-        .unwrap_or_default();
+impl PeersDb {
+    pub fn new() -> Self {
+        PeersDb::default()
+    }
 
-    let response = AnnounceResponse {
-        interval: 1800,
-        peers,
+    fn read(&self) -> anyhow::Result<std::sync::RwLockReadGuard<HashMap<String, Vec<PeerInfo>>>> {
+        self.inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("failed to lock peers db"))
+    }
+
+    fn write(&self) -> anyhow::Result<std::sync::RwLockWriteGuard<HashMap<String, Vec<PeerInfo>>>> {
+        self.inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("failed to lock peers db"))
+    }
+
+    pub fn clone(&self) -> Self {
+        PeersDb {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+pub fn announce_filter(
+    peers_db: &PeersDb,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let get = warp::path("announce")
+        .and(warp::get())
+        .and(with_peers_db(peers_db.clone()))
+        .and(warp::query::<InfoHashRequest>())
+        .map(handle_announce_get);
+
+    let post = warp::path("announce")
+        .and(warp::post())
+        .and(with_peers_db(peers_db.clone()))
+        .and(warp::body::json::<AnnounceRequest>())
+        .map(handle_announce_post);
+
+    get.or(post)
+}
+
+fn handle_announce_get(peers_db: PeersDb, info_hash_request: InfoHashRequest) -> impl warp::Reply {
+    let db = match peers_db.read() {
+        Ok(db) => db,
+        Err(e) => {
+            return warp::http::Response::builder()
+                .status(warp::http::StatusCode::INTERNAL_SERVER_ERROR)
+                .body(e.to_string());
+        }
     };
 
-    let encoded = serde_bencode::to_bytes(&response).unwrap();
+    let response = db
+        .get(&info_hash_request.info_hash)
+        .cloned()
+        .map(|peers| AnnounceResponse {
+            interval: 1800,
+            peers,
+        });
+
+    let response = match response {
+        Some(response) => response,
+        None => {
+            return warp::http::Response::builder()
+                .status(warp::http::StatusCode::NOT_FOUND)
+                .body(format!(
+                    "No peers found for the given info hash: {}",
+                    info_hash_request.info_hash
+                ))
+        }
+    };
+
+    let encoded = match serde_bencode::to_string(&response) {
+        Ok(encoded) => encoded,
+        Err(e) => {
+            return warp::http::Response::builder()
+                .status(warp::http::StatusCode::INTERNAL_SERVER_ERROR)
+                .body(e.to_string());
+        }
+    };
 
     warp::http::Response::builder()
         .status(warp::http::StatusCode::OK)
@@ -64,47 +128,39 @@ fn handle_announce_get(info_hash_request: InfoHashRequest, peers_db: PeersDb) ->
         .body(encoded)
 }
 
-fn handle_announce_post(announce_request: AnnounceRequest, peers_db: PeersDb) -> impl warp::Reply {
-    let mut db = peers_db.lock().unwrap();
-    let peers = db.entry(announce_request.info_hash.clone()).or_default();
-
-    let peer_info = PeerInfo {
-        peer_id: announce_request.peer_id.clone(),
-        ip: announce_request.ip.clone(),
-        port: announce_request.port,
+fn handle_announce_post(peers_db: PeersDb, announce_request: AnnounceRequest) -> impl warp::Reply {
+    let mut db = match peers_db.write() {
+        Ok(db) => db,
+        Err(e) => {
+            return warp::http::Response::builder()
+                .status(warp::http::StatusCode::INTERNAL_SERVER_ERROR)
+                .body(e.to_string());
+        }
     };
 
-    peers.retain(|peer| peer.peer_id != announce_request.peer_id);
-    peers.push(peer_info);
+    db.entry(announce_request.info_hash)
+        .or_default()
+        .push(PeerInfo {
+            peer_id: announce_request.peer_id,
+            ip: announce_request.ip,
+            port: announce_request.port,
+        });
 
     warp::http::Response::builder()
         .status(warp::http::StatusCode::NO_CONTENT)
-        .body("")
+        .body("".to_string())
 }
 
-pub fn announce_filter(
+fn with_peers_db(
     peers_db: PeersDb,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    let get = warp::path("announce")
-        .and(warp::get())
-        .and(warp::query::<InfoHashRequest>())
-        .and(with_peers_db(peers_db.clone()))
-        .map(handle_announce_get);
-
-    let post = warp::path("announce")
-        .and(warp::post())
-        .and(warp::body::json::<AnnounceRequest>())
-        .and(with_peers_db(peers_db))
-        .map(handle_announce_post);
-
-    get.or(post)
+) -> impl Filter<Extract = (PeersDb,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || peers_db.clone())
 }
 
 #[tokio::main]
 pub async fn main() {
-    let peers_db: PeersDb = Arc::new(Mutex::new(HashMap::new()));
-    let announce = announce_filter(peers_db);
-
+    let peers_db = PeersDb::new();
+    let announce = announce_filter(&peers_db);
     warp::serve(announce).run(([127, 0, 0, 1], 3030)).await;
 }
 
@@ -114,13 +170,32 @@ mod tests {
     use warp::test::request;
 
     #[tokio::test]
-    async fn test_announce_get() {
-        let peers_db: PeersDb = Arc::new(Mutex::new(HashMap::new()));
-        let filter = announce_filter(peers_db.clone());
+    async fn test_announce_get_no_peers() -> anyhow::Result<()> {
+        let peers_db = PeersDb::new();
+        let filter = announce_filter(&peers_db);
+
+        let response = request()
+            .method("GET")
+            .path("/announce?info_hash=testhash")
+            .reply(&filter)
+            .await;
+
+        assert_eq!(response.status(), 404);
+        assert_eq!(
+            response.body(),
+            "No peers found for the given info hash: testhash"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_announce_get() -> anyhow::Result<()> {
+        let peers_db = PeersDb::new();
+        let filter = announce_filter(&peers_db);
 
         // Add a peer
         {
-            let mut db = peers_db.lock().unwrap();
+            let mut db = peers_db.write()?;
             db.entry("testhash".to_string())
                 .or_default()
                 .push(PeerInfo {
@@ -145,12 +220,13 @@ mod tests {
         assert_eq!(announce_response.peers[0].peer_id, "testpeer");
         assert_eq!(announce_response.peers[0].ip, "127.0.0.1");
         assert_eq!(announce_response.peers[0].port, 8080);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_announce_post() {
-        let peers_db: PeersDb = Arc::new(Mutex::new(HashMap::new()));
-        let filter = announce_filter(peers_db.clone());
+    async fn test_announce_post() -> anyhow::Result<()> {
+        let peers_db = PeersDb::new();
+        let filter = announce_filter(&peers_db);
 
         let announce_request = AnnounceRequest {
             info_hash: "info_hash_1".to_string(),
@@ -167,18 +243,19 @@ mod tests {
             .await;
         assert_eq!(response.status(), warp::http::StatusCode::NO_CONTENT);
 
-        let db = peers_db.lock().unwrap();
+        let db = peers_db.read()?;
         let peers = db.get("info_hash_1").unwrap();
         assert_eq!(peers.len(), 1);
         assert_eq!(peers[0].peer_id, "peer1");
         assert_eq!(peers[0].ip, "127.0.0.1");
         assert_eq!(peers[0].port, 8080);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_multiple_peers_announce() {
-        let peers_db: PeersDb = Arc::new(Mutex::new(HashMap::new()));
-        let filter = announce_filter(peers_db.clone());
+    async fn test_multiple_peers_announce() -> anyhow::Result<()> {
+        let peers_db = PeersDb::new();
+        let filter = announce_filter(&peers_db);
 
         let peer_1 = AnnounceRequest {
             info_hash: "info_hash_1".to_string(),
@@ -229,7 +306,7 @@ mod tests {
         assert_eq!(response_3.status(), warp::http::StatusCode::NO_CONTENT);
 
         // Check the state of peers_db
-        let db = peers_db.lock().unwrap();
+        let db = peers_db.read()?;
 
         // Check peers for info_hash_1
         let peers_info_hash_1 = db.get("info_hash_1").unwrap();
@@ -247,16 +324,17 @@ mod tests {
         assert!(peers_info_hash_2
             .iter()
             .any(|peer| peer.peer_id == "peer3" && peer.ip == "192.168.1.4" && peer.port == 6883));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_announce_get_with_optional_params() {
-        let peers_db: PeersDb = Arc::new(Mutex::new(HashMap::new()));
-        let filter = announce_filter(peers_db.clone());
+    async fn test_announce_get_with_optional_params() -> anyhow::Result<()> {
+        let peers_db = PeersDb::new();
+        let filter = announce_filter(&peers_db);
 
         // Add a peer
         {
-            let mut db = peers_db.lock().unwrap();
+            let mut db = peers_db.write()?;
             db.entry("testhash".to_string())
                 .or_default()
                 .push(PeerInfo {
@@ -281,5 +359,6 @@ mod tests {
         assert_eq!(announce_response.peers[0].peer_id, "testpeer");
         assert_eq!(announce_response.peers[0].ip, "127.0.0.1");
         assert_eq!(announce_response.peers[0].port, 8080);
+        Ok(())
     }
 }
