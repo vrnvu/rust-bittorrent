@@ -20,9 +20,44 @@ pub struct InfoHashRequest {
     pub compact: Option<u8>,
 }
 
+type FileName = String;
+type InfoHash = String;
+
+#[derive(Debug, Default, Clone)]
+pub struct FileListing {
+    inner: Arc<RwLock<HashMap<FileName, InfoHash>>>,
+}
+
+impl FileListing {
+    fn new() -> Self {
+        FileListing::default()
+    }
+
+    fn all(&self) -> anyhow::Result<Vec<FileName>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("failed to lock file listing"))?;
+
+        Ok(inner.keys().cloned().collect())
+    }
+
+    fn read(&self, file_name: &str) -> anyhow::Result<InfoHash> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("failed to lock file listing"))?;
+
+        Ok(inner
+            .get(file_name)
+            .ok_or(anyhow::anyhow!("file not found"))?
+            .clone())
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct PeersDb {
-    inner: Arc<RwLock<HashMap<String, Vec<SocketAddr>>>>,
+    inner: Arc<RwLock<HashMap<InfoHash, Vec<SocketAddr>>>>,
 }
 
 impl PeersDb {
@@ -30,7 +65,9 @@ impl PeersDb {
         PeersDb::default()
     }
 
-    fn read(&self) -> anyhow::Result<std::sync::RwLockReadGuard<HashMap<String, Vec<SocketAddr>>>> {
+    fn read(
+        &self,
+    ) -> anyhow::Result<std::sync::RwLockReadGuard<HashMap<InfoHash, Vec<SocketAddr>>>> {
         self.inner
             .read()
             .map_err(|_| anyhow::anyhow!("failed to lock peers db"))
@@ -38,7 +75,7 @@ impl PeersDb {
 
     fn write(
         &self,
-    ) -> anyhow::Result<std::sync::RwLockWriteGuard<HashMap<String, Vec<SocketAddr>>>> {
+    ) -> anyhow::Result<std::sync::RwLockWriteGuard<HashMap<InfoHash, Vec<SocketAddr>>>> {
         self.inner
             .write()
             .map_err(|_| anyhow::anyhow!("failed to lock peers db"))
@@ -47,6 +84,7 @@ impl PeersDb {
 
 pub fn warp_handlers(
     peers_db: &PeersDb,
+    file_listing: &FileListing,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let get_announce = warp::path("announce")
         .and(warp::get())
@@ -60,8 +98,32 @@ pub fn warp_handlers(
         .and(warp::body::bytes())
         .map(handle_announce_post);
 
+    let get_file_listing = warp::path("files")
+        .and(warp::get())
+        .and(with_file_listing(file_listing.clone()))
+        .map(handle_file_listing_get);
+
     let log = warp::log("tracker");
-    get_announce.or(post_announce).with(log)
+    get_announce
+        .or(post_announce)
+        .or(get_file_listing)
+        .with(log)
+}
+
+fn handle_file_listing_get(file_listing: FileListing) -> impl warp::Reply {
+    let files = match file_listing.all() {
+        Ok(files) => files,
+        Err(e) => {
+            return warp::http::Response::builder()
+                .status(warp::http::StatusCode::INTERNAL_SERVER_ERROR)
+                .body(e.to_string());
+        }
+    };
+
+    // TODO json or bencode
+    warp::http::Response::builder()
+        .status(warp::http::StatusCode::OK)
+        .body(serde_json::to_string(&files).unwrap())
 }
 
 fn handle_announce_get(peers_db: PeersDb, info_hash_request: InfoHashRequest) -> impl warp::Reply {
@@ -143,6 +205,12 @@ fn with_peers_db(
     warp::any().map(move || peers_db.clone())
 }
 
+fn with_file_listing(
+    file_listing: FileListing,
+) -> impl Filter<Extract = (FileListing,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || file_listing.clone())
+}
+
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
     if args().len() != 2 {
@@ -158,7 +226,7 @@ pub async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let peers_db = PeersDb::new();
-    let handlers = warp_handlers(&peers_db);
+    let handlers = warp_handlers(&peers_db, &FileListing::new());
     warp::serve(handlers).run(([127, 0, 0, 1], port)).await;
 
     Ok(())
@@ -173,7 +241,7 @@ mod tests {
     #[tokio::test]
     async fn test_announce_get_no_peers() -> anyhow::Result<()> {
         let peers_db = PeersDb::new();
-        let filter = warp_handlers(&peers_db);
+        let filter = warp_handlers(&peers_db, &FileListing::new());
 
         let response = request()
             .method("GET")
@@ -192,7 +260,7 @@ mod tests {
     #[tokio::test]
     async fn test_announce_get() -> anyhow::Result<()> {
         let peers_db = PeersDb::new();
-        let filter = warp_handlers(&peers_db);
+        let filter = warp_handlers(&peers_db, &FileListing::new());
 
         // Add a peer
         {
@@ -225,7 +293,7 @@ mod tests {
     #[tokio::test]
     async fn test_announce_post() -> anyhow::Result<()> {
         let peers_db = PeersDb::new();
-        let filter = warp_handlers(&peers_db);
+        let filter = warp_handlers(&peers_db, &FileListing::new());
 
         let announce_register = RegisterRequest {
             info_hash: "info_hash_1".to_string(),
@@ -254,7 +322,7 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_peers_announce() -> anyhow::Result<()> {
         let peers_db = PeersDb::new();
-        let filter = warp_handlers(&peers_db);
+        let filter = warp_handlers(&peers_db, &FileListing::new());
 
         let peer_1 = RegisterRequest {
             info_hash: "info_hash_1".to_string(),
@@ -332,7 +400,7 @@ mod tests {
     #[tokio::test]
     async fn test_announce_get_with_optional_params() -> anyhow::Result<()> {
         let peers_db = PeersDb::new();
-        let filter = warp_handlers(&peers_db);
+        let filter = warp_handlers(&peers_db, &FileListing::new());
 
         // Add a peer
         {
@@ -361,6 +429,18 @@ mod tests {
         assert_eq!(announce_response.peers.len(), 1);
         assert_eq!(announce_response.peers[0].ip().to_string(), "127.0.0.1");
         assert_eq!(announce_response.peers[0].port(), 8080);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_file_listing() -> anyhow::Result<()> {
+        let peers_db = PeersDb::new();
+        let file_listing = FileListing::new();
+        let filter = warp_handlers(&peers_db, &file_listing);
+
+        let response = request().method("GET").path("/files").reply(&filter).await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.body(), "[]");
         Ok(())
     }
 }

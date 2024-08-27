@@ -81,8 +81,6 @@ pub async fn try_announce(request: AnnounceRequest) -> anyhow::Result<AnnounceRe
 }
 
 pub async fn try_register(torrent: &TorrentFile) -> anyhow::Result<()> {
-    let client = reqwest::Client::new();
-
     let announce_url = torrent.announce_url.clone();
     let info_hash = torrent.info_hash.clone();
 
@@ -98,7 +96,7 @@ pub async fn try_register(torrent: &TorrentFile) -> anyhow::Result<()> {
     );
 
     let body = serde_bencode::to_bytes(&register_request)?;
-    let response = client
+    let response = reqwest::Client::new()
         .post(&announce_url)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(body)

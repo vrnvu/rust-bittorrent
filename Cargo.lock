@@ -1855,6 +1855,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_bencode",
+ "serde_json",
  "tokio",
  "warp",
  "wiremock",
