@@ -4,12 +4,24 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RegisterRequest {
+    pub name: String,
     pub info_hash: String,
     pub peer_id: String,
     pub ip: String,
     pub port: u16,
 }
 
+impl RegisterRequest {
+    pub fn new(name: &str, info_hash: &str, peer_id: &str, ip: &str, port: u16) -> Self {
+        RegisterRequest {
+            name: name.to_string(),
+            info_hash: info_hash.to_string(),
+            peer_id: peer_id.to_string(),
+            ip: ip.to_string(),
+            port,
+        }
+    }
+}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AnnounceResponseRaw {
     pub interval: i64,
