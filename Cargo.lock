@@ -175,6 +175,7 @@ dependencies = [
  "serde_bencode",
  "serde_bytes",
  "serde_derive",
+ "serde_json",
  "sha1",
  "tempfile",
  "tokio",

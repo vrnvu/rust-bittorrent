@@ -114,7 +114,8 @@ pub fn warp_handlers(
         .and(warp::body::bytes())
         .map(handle_announce_post);
 
-    let get_file_listing = warp::path("files")
+    let get_file_listing = warp::path("announce")
+        .and(warp::path("files"))
         .and(warp::get())
         .and(with_file_listing(file_listing.clone()))
         .map(handle_file_listing_get);
@@ -319,6 +320,15 @@ mod tests {
                 .reply(&filter)
                 .await
         }
+
+        async fn get_file_listing(&self) -> warp::http::Response<bytes::Bytes> {
+            let filter = self.filter();
+            request()
+                .method("GET")
+                .path("/announce/files")
+                .reply(&filter)
+                .await
+        }
     }
 
     #[tokio::test]
@@ -440,11 +450,7 @@ mod tests {
     #[tokio::test]
     async fn test_empty_file_listing() -> anyhow::Result<()> {
         let mock_request = MockRequest::new();
-        let response = request()
-            .method("GET")
-            .path("/files")
-            .reply(&mock_request.filter())
-            .await;
+        let response = mock_request.get_file_listing().await;
         assert_eq!(response.status(), warp::http::StatusCode::OK);
         assert_eq!(response.body(), "[]");
         Ok(())
@@ -458,12 +464,7 @@ mod tests {
         let response_1 = mock_request.post_announce(&peer_1).await;
         assert_eq!(response_1.status(), warp::http::StatusCode::NO_CONTENT);
 
-        let response_2 = request()
-            .method("GET")
-            .path("/files")
-            .reply(&mock_request.filter())
-            .await;
-
+        let response_2 = mock_request.get_file_listing().await;
         assert_eq!(response_2.status(), warp::http::StatusCode::OK);
         assert_eq!(response_2.body(), "[\"test1\"]");
 

@@ -226,7 +226,12 @@ async fn main() -> anyhow::Result<()> {
         Commands::Download { file, output_path } => download(file, output_path).await,
         Commands::Upload { file, port } => upload(file, port).await,
         Commands::Interactive => {
-            let files = ["file1.txt", "file2.txt", "file3.txt"];
+            let announce_url = "http://localhost:9999/announce";
+            let files = http::try_list_files(announce_url).await?;
+            if files.is_empty() {
+                info!("no files available to download");
+                return Ok(());
+            }
 
             let selected_file = FuzzySelect::with_theme(&ColorfulTheme::default())
                 .with_prompt("Select a file to download from available peers")

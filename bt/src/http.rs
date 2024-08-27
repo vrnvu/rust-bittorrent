@@ -118,6 +118,30 @@ pub async fn try_register(torrent: &TorrentFile) -> anyhow::Result<()> {
     }
 }
 
+pub async fn try_list_files(announce_url: &str) -> anyhow::Result<Vec<String>> {
+    let url = format!("{}/files", announce_url);
+    let response = reqwest::Client::new()
+        .get(&url)
+        .send()
+        .await
+        .with_context(|| format!("failed to send list_files request to {}", url))?;
+    if response.status().is_success() {
+        let body = response
+            .text()
+            .await
+            .context("failed to read response body")?;
+        let files: Vec<String> = serde_json::from_str(&body)?;
+        Ok(files)
+    } else {
+        let status = response.status();
+        error!("register request failed with status: {}", status);
+        Err(anyhow::anyhow!(
+            "register request failed with status: {}",
+            status
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
