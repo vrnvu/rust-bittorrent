@@ -65,17 +65,15 @@ impl From<&AnnounceResponseRaw> for AnnounceResponse {
 }
 
 pub async fn try_announce(request: AnnounceRequest) -> anyhow::Result<AnnounceResponse> {
-    let client = reqwest::Client::new();
-
     let announce_url = request.announce_url;
     let info_hash = request.info_hash;
     let left = request.left;
-    let url = format!("{announce_url}/?info_hash={info_hash}");
 
-    info!("sending announce request to {}", url);
+    info!("sending announce request to {}", announce_url);
 
-    let r = client
-        .get(&url)
+    let response = reqwest::Client::new()
+        .get(&announce_url)
+        .query(&[("info_hash", info_hash)])
         .query(&[("peer_id", "00112233445566778899")])
         .query(&[("port", 6881)])
         .query(&[("uploaded", 0)])
@@ -84,20 +82,39 @@ pub async fn try_announce(request: AnnounceRequest) -> anyhow::Result<AnnounceRe
         .query(&[("compact", 1)])
         .send()
         .await
-        .with_context(|| format!("failed to send request to {}", url))?;
+        .with_context(|| format!("failed to send request to {}", announce_url))?;
 
-    if r.status().is_success() {
-        let bytes = r.bytes().await.context("failed to read response bytes")?;
-        let resp = serde_bencode::de::from_bytes::<AnnounceResponseRaw>(&bytes)
-            .context("failed to deserialize announce response")?;
+    if response.status().is_success() {
+        let bytes = response
+            .bytes()
+            .await
+            .context("failed to read response bytes")?;
+        let resp = match serde_bencode::de::from_bytes::<AnnounceResponseRaw>(&bytes) {
+            Ok(resp) => resp,
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "failed to deserialize announce response: {}. Response body: {:?}",
+                    e,
+                    String::from_utf8_lossy(&bytes)
+                ));
+            }
+        };
         debug!("announce response: {:?}", resp);
         Ok(AnnounceResponse::from(&resp))
     } else {
-        let status = r.status();
-        error!("announce request failed with status: {}", status);
+        let status = response.status();
+        let error_body = response
+            .text()
+            .await
+            .unwrap_or_else(|e| format!("Failed to read error body: {}", e));
+        error!(
+            "Announce request failed with status: {}. Error body: {}",
+            status, error_body
+        );
         Err(anyhow::anyhow!(
-            "announce request failed with status: {}",
-            status
+            "Announce request failed with status: {}. Error body: {}",
+            status,
+            error_body
         ))
     }
 }
@@ -107,7 +124,6 @@ pub async fn try_register(torrent: &TorrentFile) -> anyhow::Result<()> {
 
     let announce_url = torrent.announce_url.clone();
     let info_hash = torrent.info_hash.clone();
-    let url = format!("{announce_url}/announce");
 
     let register_request = RegisterRequest {
         info_hash,
@@ -115,16 +131,19 @@ pub async fn try_register(torrent: &TorrentFile) -> anyhow::Result<()> {
         ip: "127.0.0.1".to_string(),
         port: 6881,
     };
-    info!("sending register request {:?} to {url}", register_request);
+    info!(
+        "sending register request {:?} to {announce_url}",
+        register_request
+    );
 
     let body = serde_bencode::to_bytes(&register_request)?;
     let response = client
-        .post(&url)
+        .post(&announce_url)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(body)
         .send()
         .await
-        .with_context(|| format!("failed to send request to {}", url))?;
+        .with_context(|| format!("failed to send request to {}", announce_url))?;
 
     if response.status().is_success() {
         Ok(())
@@ -206,7 +225,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err().to_string(),
-            "announce request failed with status: 500 Internal Server Error"
+            "Announce request failed with status: 500 Internal Server Error. Error body: "
         );
     }
 
@@ -233,9 +252,9 @@ mod tests {
         let result = try_announce(request).await;
         assert!(result.is_err());
 
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "failed to deserialize announce response"
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("failed to deserialize announce response"));
     }
 }

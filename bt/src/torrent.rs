@@ -43,15 +43,18 @@ pub struct TorrentFile {
 }
 
 impl TorrentFile {
+    // TODO
+    #[allow(dead_code)]
     pub fn try_as_torrent_file<P>(path: P, tracker_port: u16) -> anyhow::Result<Self>
     where
         P: AsRef<Path>,
     {
         const PIECE_LENGTH: i64 = 32 * 1024; // n * 1024 KiB
 
+        // TODO we set announce and tracker manually here to build a .torrent file
         let host = "127.0.0.1";
         let port = tracker_port;
-        let announce_url = format!("http://{}:{}", host, port);
+        let announce_url = format!("http://{}:{}/announce", host, port);
 
         let torrent = TorrentBuilder::new(&path, PIECE_LENGTH)
             .set_announce(Some(announce_url.to_owned()))
@@ -95,7 +98,7 @@ impl TorrentFile {
         // TODO
         let host = "127.0.0.1";
         let port = 9999;
-        let announce_url = format!("http://{}:{}", host, port);
+        let announce_url = format!("http://{}:{}/announce", host, port);
 
         TorrentBuilder::new(&path, PIECE_LENGTH)
             .set_announce(Some(announce_url.to_owned()))

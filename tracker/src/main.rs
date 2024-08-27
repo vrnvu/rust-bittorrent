@@ -3,8 +3,8 @@ use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env::{self, args};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, RwLock};
-use warp::filters::body::bytes;
 use warp::Filter;
 
 // TODO this is the same as the one in bt/src/http.rs
@@ -16,17 +16,48 @@ pub struct RegisterRequest {
     pub port: u16,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct AnnounceResponse {
-    pub interval: u32,
-    pub peers: Vec<PeerInfo>,
+#[derive(Debug, Serialize, Deserialize)]
+struct AnnounceResponseRaw {
+    interval: i64,
+    peers: Vec<u8>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct PeerInfo {
-    pub peer_id: String,
-    pub ip: String,
-    pub port: u16,
+impl AnnounceResponseRaw {
+    pub fn from_socket_addrs(interval: i64, peers: &[SocketAddr]) -> Self {
+        // IPv4: 4 bytes for the address, 2 bytes for the port
+        let mut buf = Vec::with_capacity(peers.len() * 6);
+        for peer in peers {
+            if let SocketAddr::V4(addr) = peer {
+                buf.extend_from_slice(&addr.ip().octets());
+                buf.extend_from_slice(&addr.port().to_be_bytes());
+            }
+        }
+        AnnounceResponseRaw {
+            interval,
+            peers: buf,
+        }
+    }
+}
+
+pub struct AnnounceResponse {
+    pub interval: i64,
+    pub peers: Vec<SocketAddr>,
+}
+
+impl From<AnnounceResponseRaw> for AnnounceResponse {
+    fn from(value: AnnounceResponseRaw) -> Self {
+        let mut peers = Vec::new();
+        for chunk in value.peers.chunks(6) {
+            let ip = Ipv4Addr::new(chunk[0], chunk[1], chunk[2], chunk[3]);
+            // Extract the port part (last 2 bytes) and convert to u16
+            let port = ((chunk[4] as u16) << 8) | (chunk[5] as u16);
+            peers.push(SocketAddr::new(IpAddr::V4(ip), port));
+        }
+        AnnounceResponse {
+            interval: value.interval,
+            peers,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -43,7 +74,7 @@ pub struct InfoHashRequest {
 
 #[derive(Debug, Default, Clone)]
 pub struct PeersDb {
-    inner: Arc<RwLock<HashMap<String, Vec<PeerInfo>>>>,
+    inner: Arc<RwLock<HashMap<String, Vec<SocketAddr>>>>,
 }
 
 impl PeersDb {
@@ -51,13 +82,15 @@ impl PeersDb {
         PeersDb::default()
     }
 
-    fn read(&self) -> anyhow::Result<std::sync::RwLockReadGuard<HashMap<String, Vec<PeerInfo>>>> {
+    fn read(&self) -> anyhow::Result<std::sync::RwLockReadGuard<HashMap<String, Vec<SocketAddr>>>> {
         self.inner
             .read()
             .map_err(|_| anyhow::anyhow!("failed to lock peers db"))
     }
 
-    fn write(&self) -> anyhow::Result<std::sync::RwLockWriteGuard<HashMap<String, Vec<PeerInfo>>>> {
+    fn write(
+        &self,
+    ) -> anyhow::Result<std::sync::RwLockWriteGuard<HashMap<String, Vec<SocketAddr>>>> {
         self.inner
             .write()
             .map_err(|_| anyhow::anyhow!("failed to lock peers db"))
@@ -79,7 +112,8 @@ pub fn announce_filter(
         .and(warp::body::bytes())
         .map(handle_announce_post);
 
-    get.or(post)
+    let log = warp::log("tracker");
+    get.or(post).with(log)
 }
 
 fn handle_announce_get(peers_db: PeersDb, info_hash_request: InfoHashRequest) -> impl warp::Reply {
@@ -92,16 +126,8 @@ fn handle_announce_get(peers_db: PeersDb, info_hash_request: InfoHashRequest) ->
         }
     };
 
-    let response = db
-        .get(&info_hash_request.info_hash)
-        .cloned()
-        .map(|peers| AnnounceResponse {
-            interval: 1800,
-            peers,
-        });
-
-    let response = match response {
-        Some(response) => response,
+    let response = match db.get(&info_hash_request.info_hash) {
+        Some(peers) => AnnounceResponseRaw::from_socket_addrs(1800, peers),
         None => {
             return warp::http::Response::builder()
                 .status(warp::http::StatusCode::NOT_FOUND)
@@ -148,13 +174,14 @@ fn handle_announce_post(peers_db: PeersDb, body: bytes::Bytes) -> impl warp::Rep
         }
     };
 
+    let peer_socket_addr = SocketAddr::new(
+        IpAddr::V4(announce_register.ip.parse().unwrap()),
+        announce_register.port,
+    );
+
     db.entry(announce_register.info_hash.clone())
         .or_default()
-        .push(PeerInfo {
-            peer_id: announce_register.peer_id.clone(),
-            ip: announce_register.ip.clone(),
-            port: announce_register.port,
-        });
+        .push(peer_socket_addr);
     debug!("peer added to db: {:?}", announce_register);
 
     warp::http::Response::builder()
@@ -195,6 +222,24 @@ mod tests {
     use warp::test::request;
 
     #[tokio::test]
+    async fn test_announce_response_raw_from_socket_addrs_to_announce_response(
+    ) -> anyhow::Result<()> {
+        let peers = vec![
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 6881),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)), 8080),
+        ];
+        let raw_response = AnnounceResponseRaw::from_socket_addrs(123, &peers);
+        let announce_response: AnnounceResponse = raw_response.into();
+        assert_eq!(announce_response.interval, 123);
+        assert_eq!(announce_response.peers.len(), 2);
+        assert_eq!(announce_response.peers[0].ip().to_string(), "127.0.0.1");
+        assert_eq!(announce_response.peers[0].port(), 6881);
+        assert_eq!(announce_response.peers[1].ip().to_string(), "192.168.0.1");
+        assert_eq!(announce_response.peers[1].port(), 8080);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_announce_get_no_peers() -> anyhow::Result<()> {
         let peers_db = PeersDb::new();
         let filter = announce_filter(&peers_db);
@@ -220,14 +265,11 @@ mod tests {
 
         // Add a peer
         {
+            let peer_socket_addr = SocketAddr::new(IpAddr::V4("127.0.0.1".parse().unwrap()), 8080);
             let mut db = peers_db.write()?;
             db.entry("testhash".to_string())
                 .or_default()
-                .push(PeerInfo {
-                    peer_id: "testpeer".to_string(),
-                    ip: "127.0.0.1".to_string(),
-                    port: 8080,
-                });
+                .push(peer_socket_addr);
         }
 
         let response = request()
@@ -238,13 +280,14 @@ mod tests {
 
         assert_eq!(response.status(), 200);
 
-        let announce_response: AnnounceResponse =
+        let announce_response_raw: AnnounceResponseRaw =
             serde_bencode::from_bytes(response.body()).unwrap();
+
+        let announce_response: AnnounceResponse = announce_response_raw.into();
         assert_eq!(announce_response.interval, 1800);
         assert_eq!(announce_response.peers.len(), 1);
-        assert_eq!(announce_response.peers[0].peer_id, "testpeer");
-        assert_eq!(announce_response.peers[0].ip, "127.0.0.1");
-        assert_eq!(announce_response.peers[0].port, 8080);
+        assert_eq!(announce_response.peers[0].ip().to_string(), "127.0.0.1");
+        assert_eq!(announce_response.peers[0].port(), 8080);
         Ok(())
     }
 
@@ -260,10 +303,11 @@ mod tests {
             port: 8080,
         };
 
+        let body = serde_bencode::to_bytes(&announce_register).unwrap();
         let response = request()
             .method("POST")
             .path("/announce")
-            .json(&announce_register)
+            .body(body)
             .reply(&filter)
             .await;
         assert_eq!(response.status(), warp::http::StatusCode::NO_CONTENT);
@@ -271,9 +315,8 @@ mod tests {
         let db = peers_db.read()?;
         let peers = db.get("info_hash_1").unwrap();
         assert_eq!(peers.len(), 1);
-        assert_eq!(peers[0].peer_id, "peer1");
-        assert_eq!(peers[0].ip, "127.0.0.1");
-        assert_eq!(peers[0].port, 8080);
+        assert_eq!(peers[0].ip().to_string(), "127.0.0.1");
+        assert_eq!(peers[0].port(), 8080);
         Ok(())
     }
 
@@ -304,28 +347,31 @@ mod tests {
         };
 
         // Announce for peer 1
+        let body1 = serde_bencode::to_bytes(&peer_1).unwrap();
         let response_1 = request()
             .method("POST")
             .path("/announce")
-            .json(&peer_1)
+            .body(body1)
             .reply(&filter)
             .await;
         assert_eq!(response_1.status(), warp::http::StatusCode::NO_CONTENT);
 
         // Announce for peer 2
+        let body2 = serde_bencode::to_bytes(&peer_2).unwrap();
         let response_2 = request()
             .method("POST")
             .path("/announce")
-            .json(&peer_2)
+            .body(body2)
             .reply(&filter)
             .await;
         assert_eq!(response_2.status(), warp::http::StatusCode::NO_CONTENT);
 
         // Announce for peer 3
+        let body3 = serde_bencode::to_bytes(&peer_3).unwrap();
         let response_3 = request()
             .method("POST")
             .path("/announce")
-            .json(&peer_3)
+            .body(body3)
             .reply(&filter)
             .await;
         assert_eq!(response_3.status(), warp::http::StatusCode::NO_CONTENT);
@@ -338,17 +384,17 @@ mod tests {
         assert_eq!(peers_info_hash_1.len(), 2);
         assert!(peers_info_hash_1
             .iter()
-            .any(|peer| peer.peer_id == "peer1" && peer.ip == "192.168.1.2" && peer.port == 6881));
+            .any(|peer| peer.ip().to_string() == "192.168.1.2" && peer.port() == 6881));
         assert!(peers_info_hash_1
             .iter()
-            .any(|peer| peer.peer_id == "peer2" && peer.ip == "192.168.1.3" && peer.port == 6882));
+            .any(|peer| peer.ip().to_string() == "192.168.1.3" && peer.port() == 6882));
 
         // Check peers for info_hash_2
         let peers_info_hash_2 = db.get("info_hash_2").unwrap();
         assert_eq!(peers_info_hash_2.len(), 1);
         assert!(peers_info_hash_2
             .iter()
-            .any(|peer| peer.peer_id == "peer3" && peer.ip == "192.168.1.4" && peer.port == 6883));
+            .any(|peer| peer.ip().to_string() == "192.168.1.4" && peer.port() == 6883));
         Ok(())
     }
 
@@ -362,11 +408,10 @@ mod tests {
             let mut db = peers_db.write()?;
             db.entry("testhash".to_string())
                 .or_default()
-                .push(PeerInfo {
-                    peer_id: "testpeer".to_string(),
-                    ip: "127.0.0.1".to_string(),
-                    port: 8080,
-                });
+                .push(SocketAddr::new(
+                    IpAddr::V4("127.0.0.1".parse().unwrap()),
+                    8080,
+                ));
         }
 
         let response = request()
@@ -377,13 +422,14 @@ mod tests {
 
         assert_eq!(response.status(), 200);
 
-        let announce_response: AnnounceResponse =
+        let announce_response_raw: AnnounceResponseRaw =
             serde_bencode::from_bytes(response.body()).unwrap();
+
+        let announce_response: AnnounceResponse = announce_response_raw.into();
         assert_eq!(announce_response.interval, 1800);
         assert_eq!(announce_response.peers.len(), 1);
-        assert_eq!(announce_response.peers[0].peer_id, "testpeer");
-        assert_eq!(announce_response.peers[0].ip, "127.0.0.1");
-        assert_eq!(announce_response.peers[0].port, 8080);
+        assert_eq!(announce_response.peers[0].ip().to_string(), "127.0.0.1");
+        assert_eq!(announce_response.peers[0].port(), 8080);
         Ok(())
     }
 }
