@@ -11,6 +11,7 @@ use log::{debug, error, info, warn};
 use tokio::io::{self};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::timeout;
+use torrent::PeerMessage;
 
 mod cli;
 mod http;
@@ -136,6 +137,23 @@ async fn handle_peer(mut stream: TcpStream, torrent: &torrent::TorrentFile) -> a
         .map_err(|_| anyhow::anyhow!("Handshake timed out"))??;
 
     info!("Handshake completed with peer {}", peer_addr);
+
+    // TODO: send bitfield to peer
+    PeerMessage::Bitfield(vec![0]).send(&mut stream).await?;
+    info!("bitfield send to peer");
+
+    match PeerMessage::receive(&mut stream).await? {
+        PeerMessage::Interested => {
+            info!("peer is interested");
+        }
+        other => {
+            error!("expected: Interested, got:{:?}", other);
+            bail!("expected: Interested, got:{:?}", other);
+        }
+    }
+
+    PeerMessage::Unchoke.send(&mut stream).await?;
+    info!("unchoke send to peer");
 
     let mut consecutive_timeouts = 0;
     loop {

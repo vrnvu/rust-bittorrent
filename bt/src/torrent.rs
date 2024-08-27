@@ -354,7 +354,8 @@ impl PeerMessage {
                 begin,
                 block,
             } => PeerMessage::buffer_piece(*index, *begin, block).await?,
-            _ => bail!("unexpected message type: {:?}, not implemented yet", self),
+            PeerMessage::Bitfield(bitfield) => PeerMessage::buffer_bitfield(bitfield).await?,
+            PeerMessage::Unchoke => PeerMessage::buffer_unchoke().await?,
         };
         self.write_message(&buffer, stream).await?;
         Ok(())
@@ -386,6 +387,18 @@ impl PeerMessage {
         buffer.extend_from_slice(&index.to_be_bytes());
         buffer.extend_from_slice(&begin.to_be_bytes());
         buffer.extend_from_slice(&length.to_be_bytes());
+        Ok(buffer)
+    }
+
+    async fn buffer_bitfield(bitfield: &[u8]) -> anyhow::Result<Vec<u8>> {
+        let mut buffer = Vec::with_capacity(1 + bitfield.len()); // 1 byte for tag + bitfield length
+        buffer.push(MessageTag::Bitfield as u8);
+        buffer.extend_from_slice(bitfield);
+        Ok(buffer)
+    }
+
+    async fn buffer_unchoke() -> anyhow::Result<Vec<u8>> {
+        let buffer = vec![MessageTag::Unchoke as u8];
         Ok(buffer)
     }
 
