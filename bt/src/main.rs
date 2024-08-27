@@ -18,30 +18,6 @@ mod http;
 mod torrent;
 mod udp;
 
-async fn download_from_peer(file: &str, output_path: &str) -> anyhow::Result<()> {
-    let torrent: torrent::TorrentFile = torrent::TorrentFile::from_path(file)
-        .with_context(|| format!("failed to read {} file", file))?;
-
-    // TODO
-    let peer_addr = "127.0.0.1:6881";
-    let mut stream = TcpStream::connect(peer_addr).await?;
-    let peer_id = torrent::HandshakeMessage::new(torrent.info_hash_bytes)
-        .initiate(&mut stream)
-        .await
-        .context("error handshake initiate with uploader")?;
-
-    info!("handshake success with uploader, peer_id: {}", peer_id);
-
-    torrent
-        .download(&mut stream, output_path)
-        .await
-        .context("failed to download torrent")?;
-
-    info!("download completed successfully");
-
-    Ok(())
-}
-
 async fn download(file: &str, output_path: &str) -> anyhow::Result<()> {
     let torrent: torrent::TorrentFile = torrent::TorrentFile::from_path(file)
         .with_context(|| format!("failed to read {} file", file))?;
@@ -250,7 +226,6 @@ async fn main() -> anyhow::Result<()> {
     match &args.command {
         Commands::Download { file, output_path } => download(file, output_path).await,
         Commands::Upload { file } => upload(file).await,
-        Commands::DownloadPeer { file, output_path } => download_from_peer(file, output_path).await,
         Commands::Interactive => {
             let files = ["file1.txt", "file2.txt", "file3.txt"];
 
@@ -280,7 +255,7 @@ async fn main() -> anyhow::Result<()> {
                 ))
                 .interact()?
             {
-                true => download_from_peer(files[selected_file], &output_path).await,
+                true => todo!(),
                 false => return Ok(()),
             }
         }

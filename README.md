@@ -6,6 +6,7 @@ A minimal BitTorrent client and tracker written in Rust, focusing on simplicity 
 
 - **bt**: The BitTorrent client that handles torrent parsing, peer communication, and file exchange.
 - **tracker**: The HTTP server that acts as a tracker for peers to announce themselves.
+- **models**: Shared data models used by both the client and tracker.
 
 ## Features
 
@@ -14,110 +15,73 @@ A minimal BitTorrent client and tracker written in Rust, focusing on simplicity 
 - **Torrent Parsing**: Parses .torrent files.
 - **Peer Communication**: Connects to peers for file exchange.
 - **Asynchronous IO**: Utilizes Tokio for efficient networking.
-
-### Tracker (tracker) (TODO/Work in progress)
-
-- **Peer Announcement**: Accepts and manages peer announcements.
-- **Peer List Management**: Provides a list of peers to clients.
-
-## Usage
-
-### BitTorrent Client (bt)
-
-#### Command-line Interface (CLI)
-
-```sh
-bt download --file <path_to_torrent_file> --output_path <output_directory> [--verbose]
-```
-
-#### Examples
-
-```sh
-# Download a torrent file with default logging and output path
-bt download --file sample.torrent --output_path test.txt
-
-# Download a torrent file with default logging and output path creating a folder
-bt download --file sample.torrent --output_path test_folder/test.txt
-
-# Download a torrent file with verbose logging
-bt download --file sample.torrent --output_path test_folder/test.txt --verbose
-```
+- **Upload Mode**: Allows sharing of files with other peers.
+- **Download Mode**: Fetches files from other peers.
 
 ### Tracker
 
-#### Starting the Tracker Server
+- **Peer Announcement**: Accepts and manages peer announcements.
+- **Peer List Management**: Provides a list of peers to clients.
+- **Content Discovery**: Helps peers discover what content is available in the network.
 
-The tracker runs an HTTP server on `http://127.0.0.1:3030` by default.
+## Current State of the Project
 
-```sh
-cargo run -p tracker
-```
+The project currently supports basic BitTorrent functionality:
 
-#### Example Announcement Request
+1. The tracker allows peers to register the content they have available.
+2. Peers can operate in both upload and download modes.
+3. The tracker is used for peer discovery and content discovery.
+4. The client can parse .torrent files and communicate with peers.
 
-Peers announce themselves to the tracker by sending a GET request to the `/announce` endpoint with the required query parameters.
+## Usage and Explanation
 
-Example using `curl`:
+### 1. Tracker Setup
 
-```sh
-curl "http://127.0.0.1:3030/announce?info_hash=12345&peer_id=peer1&ip=192.168.1.2&port=6881"
-```
+1. Start the tracker on port 9999 (currently hardcoded):
+   ```
+   tracker 9999
+   ```
+2. The tracker initializes and listens for HTTP requests from peers.
 
-## Running the Project
+### 2. File Upload Process
 
-### Workspace Setup
+1. Run the upload command:
+   ```
+   bt upload --file <path_to_file> [--verbose]
+   ```
+2. The client reads the file and generates an info hash.
+3. The client sends an HTTP announcement to the tracker with the info hash and peer information.
+4. The tracker stores this information (no health check implemented yet).
+5. The upload process currently blocks the peer process (background operation planned for future).
 
-Ensure you have Rust installed. Clone the repository and navigate to the project directory.
+### 3. File Download Process
 
-```sh
-git clone https://github.com/yourusername/rust-bittorrent.git
-cd rust-bittorrent
-```
+1. Run the download command:
+   ```
+   bt download --file <path_to_torrent_file> --output_path <output_directory> [--verbose]
+   ```
+2. The client parses the .torrent file to extract the info hash and tracker URL.
+3. The client sends an HTTP request to the tracker to get a list of peers for the desired file.
+4. The tracker responds with available peers for the requested info hash.
+5. The client initiates the BitTorrent protocol with the available peers:
+   - Establishes connections
+   - Performs handshakes
+   - Exchanges piece information
+   - Requests and receives file pieces
+6. The client assembles the received pieces and saves the complete file to the specified output path.
 
-### Building the Project
+### Important Notes
 
-To build the entire workspace:
+- The current implementation only supports HTTP trackers.
+- The BitTorrent protocol implementation is functional and compatible with other peers/trackers but lacks advanced optimizations.
+- The upload process currently doesn't implement background seeding (planned for future updates).
+- The system doesn't currently implement peer health checks or sophisticated peer selection strategies.
 
-```sh
-cargo build
-```
+### Future Improvements
 
-### Running the BitTorrent Client
+- Implement background seeding for uploads
+- Add health checks for peers
+- Implement more sophisticated peer selection and piece selection algorithms
+- Support for other tracker protocols (e.g., UDP)
+- Implement DHT (Distributed Hash Table) for trackerless operation
 
-Navigate to the `bt` directory and run the client:
-
-```sh
-cd bt
-cargo run -- download --file <path_to_torrent_file> --output_path <output_directory> [--verbose]
-```
-
-or
-
-```sh
-cargo run --bin bt download --file <path_to_torrent_file> --output_path <output_directory> [--verbose]
-```
-
-### Running the Tracker
-
-Navigate to the `tracker` directory and start the server:
-
-```sh
-cd tracker
-cargo run
-```
-
-or
-
-```sh
-cargo run --bin tracker
-```
-
-#### Example Announcement Request
-
-Peers announce themselves to the tracker by sending a GET request to the `/announce` endpoint with the required query parameters.
-
-Example using `curl`:
-
-```sh
-curl -i "http://127.0.0.1:3030/announce?info_hash=12345&peer_id=peer1&ip=192.168.1.2&port=6881"
-```
