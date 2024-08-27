@@ -169,6 +169,7 @@ dependencies = [
  "hex",
  "lava_torrent",
  "log",
+ "models",
  "reqwest",
  "serde",
  "serde_bencode",
@@ -1024,6 +1025,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "models"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "multer"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1843,6 +1851,7 @@ dependencies = [
  "bytes",
  "env_logger",
  "log",
+ "models",
  "reqwest",
  "serde",
  "serde_bencode",

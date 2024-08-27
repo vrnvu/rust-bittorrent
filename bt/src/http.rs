@@ -1,19 +1,9 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-
 use anyhow::Context;
 use log::{debug, error, info};
-use serde_bytes::ByteBuf;
-use serde_derive::{Deserialize, Serialize};
+use models::{AnnounceResponse, AnnounceResponseRaw, RegisterRequest};
+use serde_derive::Serialize;
 
 use crate::torrent::TorrentFile;
-
-#[derive(Debug, Serialize, Clone)]
-pub struct RegisterRequest {
-    pub info_hash: String,
-    pub peer_id: String,
-    pub ip: String,
-    pub port: u16,
-}
 
 #[derive(Debug, Serialize)]
 pub struct AnnounceRequest {
@@ -31,35 +21,6 @@ impl From<&TorrentFile> for AnnounceRequest {
             announce_url,
             info_hash,
             left,
-        }
-    }
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-pub struct AnnounceResponse {
-    pub interval: i64,
-    pub peers: Vec<SocketAddr>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct AnnounceResponseRaw {
-    interval: i64,
-    peers: ByteBuf,
-}
-
-impl From<&AnnounceResponseRaw> for AnnounceResponse {
-    fn from(value: &AnnounceResponseRaw) -> Self {
-        let mut peers = Vec::new();
-        for chunk in value.peers.chunks(6) {
-            let ip = Ipv4Addr::new(chunk[0], chunk[1], chunk[2], chunk[3]);
-            // Extract the port part (last 2 bytes) and convert to u16
-            let port = ((chunk[4] as u16) << 8) | (chunk[5] as u16);
-            peers.push(SocketAddr::new(IpAddr::V4(ip), port));
-        }
-        AnnounceResponse {
-            interval: value.interval,
-            peers,
         }
     }
 }
@@ -100,7 +61,7 @@ pub async fn try_announce(request: AnnounceRequest) -> anyhow::Result<AnnounceRe
             }
         };
         debug!("announce response: {:?}", resp);
-        Ok(AnnounceResponse::from(&resp))
+        Ok(resp.into())
     } else {
         let status = response.status();
         let error_body = response
@@ -159,6 +120,8 @@ pub async fn try_register(torrent: &TorrentFile) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
     use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 
     use super::*;
@@ -166,11 +129,12 @@ mod tests {
     #[tokio::test]
     async fn test_try_announce_success() {
         let server = MockServer::start().await;
-        let mock_peers = vec![127, 0, 0, 1, 0x1A, 0xE1];
-        let mock_response = serde_bencode::to_bytes(&AnnounceResponseRaw {
-            interval: 123,
-            peers: ByteBuf::from(mock_peers),
-        });
+        let mock_peers = vec![
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 6881),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)), 8080),
+        ];
+        let announce_response_raw = AnnounceResponseRaw::from_socket_addrs(123, &mock_peers);
+        let mock_response = serde_bencode::to_bytes(&announce_response_raw);
         assert!(mock_response.is_ok());
 
         Mock::given(method("GET"))
@@ -192,21 +156,26 @@ mod tests {
 
         let announce_response = result.unwrap();
         assert_eq!(announce_response.interval, 123);
-        assert_eq!(announce_response.peers.len(), 1);
+        assert_eq!(announce_response.peers.len(), 2);
         assert_eq!(
             announce_response.peers[0],
             "127.0.0.1:6881".parse().unwrap()
+        );
+        assert_eq!(
+            announce_response.peers[1],
+            "192.168.0.1:8080".parse().unwrap()
         );
     }
 
     #[tokio::test]
     async fn test_try_announce_failure() {
         let server = MockServer::start().await;
-        let mock_peers = vec![127, 0, 0, 1, 0x1A, 0xE1];
-        let mock_response = serde_bencode::to_bytes(&AnnounceResponseRaw {
-            interval: 123,
-            peers: ByteBuf::from(mock_peers),
-        });
+        let mock_peers = vec![
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 6881),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)), 8080),
+        ];
+        let announce_response_raw = AnnounceResponseRaw::from_socket_addrs(123, &mock_peers);
+        let mock_response = serde_bencode::to_bytes(&announce_response_raw);
         assert!(mock_response.is_ok());
 
         Mock::given(method("GET"))

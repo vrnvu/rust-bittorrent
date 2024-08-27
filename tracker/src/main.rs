@@ -1,64 +1,12 @@
 use anyhow::Context;
 use log::{debug, info};
+use models::{AnnounceResponseRaw, RegisterRequest};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env::{self, args};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, RwLock};
 use warp::Filter;
-
-// TODO this is the same as the one in bt/src/http.rs
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct RegisterRequest {
-    pub info_hash: String,
-    pub peer_id: String,
-    pub ip: String,
-    pub port: u16,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct AnnounceResponseRaw {
-    interval: i64,
-    peers: Vec<u8>,
-}
-
-impl AnnounceResponseRaw {
-    pub fn from_socket_addrs(interval: i64, peers: &[SocketAddr]) -> Self {
-        // IPv4: 4 bytes for the address, 2 bytes for the port
-        let mut buf = Vec::with_capacity(peers.len() * 6);
-        for peer in peers {
-            if let SocketAddr::V4(addr) = peer {
-                buf.extend_from_slice(&addr.ip().octets());
-                buf.extend_from_slice(&addr.port().to_be_bytes());
-            }
-        }
-        AnnounceResponseRaw {
-            interval,
-            peers: buf,
-        }
-    }
-}
-
-pub struct AnnounceResponse {
-    pub interval: i64,
-    pub peers: Vec<SocketAddr>,
-}
-
-impl From<AnnounceResponseRaw> for AnnounceResponse {
-    fn from(value: AnnounceResponseRaw) -> Self {
-        let mut peers = Vec::new();
-        for chunk in value.peers.chunks(6) {
-            let ip = Ipv4Addr::new(chunk[0], chunk[1], chunk[2], chunk[3]);
-            // Extract the port part (last 2 bytes) and convert to u16
-            let port = ((chunk[4] as u16) << 8) | (chunk[5] as u16);
-            peers.push(SocketAddr::new(IpAddr::V4(ip), port));
-        }
-        AnnounceResponse {
-            interval: value.interval,
-            peers,
-        }
-    }
-}
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct InfoHashRequest {
@@ -219,25 +167,8 @@ pub async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use models::{AnnounceResponse, RegisterRequest};
     use warp::test::request;
-
-    #[tokio::test]
-    async fn test_announce_response_raw_from_socket_addrs_to_announce_response(
-    ) -> anyhow::Result<()> {
-        let peers = vec![
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 6881),
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)), 8080),
-        ];
-        let raw_response = AnnounceResponseRaw::from_socket_addrs(123, &peers);
-        let announce_response: AnnounceResponse = raw_response.into();
-        assert_eq!(announce_response.interval, 123);
-        assert_eq!(announce_response.peers.len(), 2);
-        assert_eq!(announce_response.peers[0].ip().to_string(), "127.0.0.1");
-        assert_eq!(announce_response.peers[0].port(), 6881);
-        assert_eq!(announce_response.peers[1].ip().to_string(), "192.168.0.1");
-        assert_eq!(announce_response.peers[1].port(), 8080);
-        Ok(())
-    }
 
     #[tokio::test]
     async fn test_announce_get_no_peers() -> anyhow::Result<()> {
