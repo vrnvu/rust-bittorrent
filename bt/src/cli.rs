@@ -33,6 +33,10 @@ pub enum Commands {
         /// Sets the path to file to upload
         #[clap(short, long)]
         file: String,
+
+        /// Sets peer port
+        #[clap(short, long)]
+        port: String,
     },
     /// Interactive mode
     Interactive, // TODO: we need a download interactive session and upload mode

@@ -77,14 +77,14 @@ async fn download(file: &str, output_path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn upload(file: &str) -> anyhow::Result<()> {
+async fn upload(file: &str, port: &str) -> anyhow::Result<()> {
     info!("starting uploader for file: {}", file);
 
     // TODO we need to announce ourselves to the tracker because we have this file
     let torrent = torrent::TorrentFile::from_path(file)?;
     http::try_register(&torrent).await?;
 
-    let listener = TcpListener::bind("127.0.0.1:6881").await?;
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await?;
     info!("Uploader listening on {}", listener.local_addr()?);
     let torrent = Arc::new(torrent);
 
@@ -225,7 +225,7 @@ async fn main() -> anyhow::Result<()> {
 
     match &args.command {
         Commands::Download { file, output_path } => download(file, output_path).await,
-        Commands::Upload { file } => upload(file).await,
+        Commands::Upload { file, port } => upload(file, port).await,
         Commands::Interactive => {
             let files = ["file1.txt", "file2.txt", "file3.txt"];
 
