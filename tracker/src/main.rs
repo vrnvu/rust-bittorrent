@@ -45,23 +45,23 @@ impl PeersDb {
     }
 }
 
-pub fn announce_filter(
+pub fn warp_handlers(
     peers_db: &PeersDb,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    let get = warp::path("announce")
+    let get_announce = warp::path("announce")
         .and(warp::get())
         .and(with_peers_db(peers_db.clone()))
         .and(warp::query::<InfoHashRequest>())
         .map(handle_announce_get);
 
-    let post = warp::path("announce")
+    let post_announce = warp::path("announce")
         .and(warp::post())
         .and(with_peers_db(peers_db.clone()))
         .and(warp::body::bytes())
         .map(handle_announce_post);
 
     let log = warp::log("tracker");
-    get.or(post).with(log)
+    get_announce.or(post_announce).with(log)
 }
 
 fn handle_announce_get(peers_db: PeersDb, info_hash_request: InfoHashRequest) -> impl warp::Reply {
@@ -158,8 +158,8 @@ pub async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let peers_db = PeersDb::new();
-    let announce = announce_filter(&peers_db);
-    warp::serve(announce).run(([127, 0, 0, 1], port)).await;
+    let handlers = warp_handlers(&peers_db);
+    warp::serve(handlers).run(([127, 0, 0, 1], port)).await;
 
     Ok(())
 }
@@ -173,7 +173,7 @@ mod tests {
     #[tokio::test]
     async fn test_announce_get_no_peers() -> anyhow::Result<()> {
         let peers_db = PeersDb::new();
-        let filter = announce_filter(&peers_db);
+        let filter = warp_handlers(&peers_db);
 
         let response = request()
             .method("GET")
@@ -192,7 +192,7 @@ mod tests {
     #[tokio::test]
     async fn test_announce_get() -> anyhow::Result<()> {
         let peers_db = PeersDb::new();
-        let filter = announce_filter(&peers_db);
+        let filter = warp_handlers(&peers_db);
 
         // Add a peer
         {
@@ -225,7 +225,7 @@ mod tests {
     #[tokio::test]
     async fn test_announce_post() -> anyhow::Result<()> {
         let peers_db = PeersDb::new();
-        let filter = announce_filter(&peers_db);
+        let filter = warp_handlers(&peers_db);
 
         let announce_register = RegisterRequest {
             info_hash: "info_hash_1".to_string(),
@@ -254,7 +254,7 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_peers_announce() -> anyhow::Result<()> {
         let peers_db = PeersDb::new();
-        let filter = announce_filter(&peers_db);
+        let filter = warp_handlers(&peers_db);
 
         let peer_1 = RegisterRequest {
             info_hash: "info_hash_1".to_string(),
@@ -332,7 +332,7 @@ mod tests {
     #[tokio::test]
     async fn test_announce_get_with_optional_params() -> anyhow::Result<()> {
         let peers_db = PeersDb::new();
-        let filter = announce_filter(&peers_db);
+        let filter = warp_handlers(&peers_db);
 
         // Add a peer
         {

@@ -80,7 +80,6 @@ async fn download(file: &str, output_path: &str) -> anyhow::Result<()> {
 async fn upload(file: &str, port: &str) -> anyhow::Result<()> {
     info!("starting uploader for file: {}", file);
 
-    // TODO we need to announce ourselves to the tracker because we have this file
     let torrent = torrent::TorrentFile::from_path(file)?;
     http::try_register(&torrent).await?;
 
