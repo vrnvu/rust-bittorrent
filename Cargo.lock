@@ -170,6 +170,7 @@ dependencies = [
  "lava_torrent",
  "log",
  "models",
+ "rand",
  "reqwest",
  "serde",
  "serde_bencode",

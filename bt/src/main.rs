@@ -15,6 +15,7 @@ use torrent::PeerMessage;
 
 mod cli;
 mod http;
+mod peer_download;
 mod torrent;
 mod udp;
 
@@ -28,52 +29,16 @@ async fn download(file: &str, output_path: &str) -> anyhow::Result<()> {
     }
     .with_context(|| format!("failed to get announce information for torrent: {}", file))?;
 
+    let peer_download = peer_download::PeerDownload::new(file, output_path, torrent);
+
     let peer = announce_response
         .peers
         .first()
         .with_context(|| format!("expected one peer at least for torrent: {}", file))?;
 
-    let mut stream = TcpStream::connect(peer).await?;
-    let peer_id = perform_handshake(&mut stream, &torrent).await?;
+    // TODO: download from multiple peers
+    peer_download.download(&[*peer]).await?;
 
-    info!("handshake success with peer {}", peer_id);
-
-    match torrent::PeerMessage::receive(&mut stream).await? {
-        torrent::PeerMessage::Bitfield(payload) => {
-            debug!("bitfield payload: {:?}", &payload);
-        }
-        other => {
-            error!("expected: Bitfield, got:{:?}", other);
-            bail!("expected: Bitfield, got:{:?}", other);
-        }
-    }
-    info!("bitfield received");
-
-    torrent::PeerMessage::Interested
-        .send(&mut stream)
-        .await
-        .with_context(|| "failed to send Interested")?;
-    info!("interested send to peer");
-
-    match torrent::PeerMessage::receive(&mut stream)
-        .await
-        .with_context(|| "failed to receive PeerMessage")?
-    {
-        torrent::PeerMessage::Unchoke => {
-            debug!("unchoke received");
-        }
-        other => {
-            error!("expected: Unchoke, got:{:?}", other);
-            bail!("expected: Unchoke, got:{:?}", other);
-        }
-    }
-
-    torrent
-        .download(&mut stream, output_path)
-        .await
-        .with_context(|| "failed to download torrent")?;
-
-    info!("success");
     Ok(())
 }
 

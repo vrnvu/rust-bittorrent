@@ -1,4 +1,5 @@
 use std::{
+    fmt::{Display, Formatter},
     fs::{self, File},
     io::{Read, Seek, SeekFrom, Write},
     path::Path,
@@ -7,6 +8,7 @@ use std::{
 use anyhow::{bail, Context, Ok};
 use lava_torrent::{bencode::BencodeElem, torrent::v1::TorrentBuilder};
 use log::{debug, error, info};
+use rand::Rng;
 use sha1::{Digest, Sha1};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -14,6 +16,30 @@ use tokio::{
 };
 
 const BLOCK_MAX_SIZE: u32 = 1 << 14;
+const PEER_ID_BT_VERSION: &str = "-BT0001-";
+
+#[derive(Debug, Clone)]
+pub struct PeerId([u8; 20]);
+
+impl PeerId {
+    pub fn new() -> Self {
+        let mut peer_id = [0u8; 20];
+        peer_id[..8].copy_from_slice(PEER_ID_BT_VERSION.as_bytes());
+        peer_id.iter_mut().skip(8).for_each(|byte| {
+            *byte = rand::thread_rng().gen_range(b'0'..=b'z');
+            while !byte.is_ascii_alphanumeric() {
+                *byte = rand::thread_rng().gen_range(b'0'..=b'z');
+            }
+        });
+        PeerId(peer_id)
+    }
+}
+
+impl Display for PeerId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", String::from_utf8_lossy(&self.0))
+    }
+}
 
 pub enum TrackerProtocol {
     Udp,
@@ -584,5 +610,12 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_generate_peer_id() {
+        let peer_id = PeerId::new();
+        assert!(peer_id.to_string().contains(PEER_ID_BT_VERSION));
+        assert!(peer_id.to_string().len() == 20);
     }
 }
