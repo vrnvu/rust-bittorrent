@@ -1,21 +1,16 @@
 use std::{
     fmt::{Display, Formatter},
-    fs::{self, File},
-    io::{Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
-use anyhow::{bail, Context, Ok};
+use anyhow::{Context, Ok};
 use lava_torrent::{bencode::BencodeElem, torrent::v1::TorrentBuilder};
-use log::{debug, error, info};
 use rand::Rng;
-use sha1::{Digest, Sha1};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
 
-const BLOCK_MAX_SIZE: u32 = 1 << 14;
 const PEER_ID_BT_VERSION: &str = "-BT0001-";
 
 #[derive(Debug, Clone)]
@@ -41,6 +36,7 @@ impl Display for PeerId {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum TrackerProtocol {
     Udp,
     Tcp,
@@ -169,111 +165,17 @@ impl TorrentFile {
         })
     }
 
-    pub async fn download_piece(
-        &self,
-        stream: &mut TcpStream,
-        piece_index: u32,
-    ) -> anyhow::Result<Vec<u8>> {
-        let piece_length = self
-            .torrent
-            .piece_length
-            .min(self.torrent.length - (self.torrent.piece_length * piece_index as i64));
-
-        let mut piece: Vec<u8> = Vec::with_capacity(piece_length as usize);
-        let mut begin_offset: u32 = 0;
-        let mut remain: u32 = piece_length as u32;
-        while remain != 0 {
-            let block_size = BLOCK_MAX_SIZE.min(remain);
-            PeerMessage::Request {
-                index: piece_index,
-                begin: begin_offset,
-                length: block_size,
-            }
-            .send(stream)
-            .await
-            .context("failed to send PeerMessage::Request")?;
-
-            if let PeerMessage::Piece {
-                index,
-                begin,
-                block,
-            } = PeerMessage::receive(stream)
-                .await
-                .context("failed to receive PeerMessage::Piece")?
-            {
-                assert_eq!(piece_index, index);
-                assert_eq!(begin_offset, begin);
-                piece.splice(begin as usize..begin as usize, block.into_iter());
-            } else {
-                error!("expected piece message from peer");
-                bail!("expected piece message from peer");
-            }
-            begin_offset += block_size;
-            remain -= block_size;
-        }
-
-        let piece_hash = self
-            .torrent
-            .pieces
-            .get(piece_index as usize)
-            .context("invalid index for piece hash")?;
-
-        let current_hash: [u8; 20] = {
-            let mut hasher = Sha1::new();
-            hasher.update(&piece);
-            hasher.finalize().into()
-        };
-
-        if *piece_hash != current_hash {
-            bail!(
-                "hash mismatch for index {}: expected {}, got {}",
-                piece_index,
-                hex::encode(piece_hash),
-                hex::encode(current_hash)
-            )
-        }
-
-        Ok(piece)
+    // TODO i64 is it safe to return as u64?
+    pub fn piece_length(&self) -> i64 {
+        self.torrent.piece_length
     }
 
-    pub async fn download(&self, stream: &mut TcpStream, output_path: &str) -> anyhow::Result<()> {
-        let mut downloaded_torrent = Vec::new();
-        for (index, _) in self.torrent.pieces.iter().enumerate() {
-            let piece = self.download_piece(stream, index as u32).await?;
-            downloaded_torrent.push(piece);
-            debug!(
-                "piece_index: {} downloaded successfully for info_hash: {}",
-                index, self.info_hash
-            );
-        }
-        let bytes = downloaded_torrent.concat();
-        if let Some(parent) = Path::new(output_path).parent() {
-            fs::create_dir_all(parent).context("cannot create output directory")?;
-        }
-
-        let mut f = File::create(output_path).context("cannot create output file")?;
-
-        f.write_all(&bytes)
-            .with_context(|| format!("failed to write downloaded data to file {}", output_path))?;
-        info!(
-            "torrent info_hash: {} downloaded successfully to {}",
-            self.info_hash, output_path
-        );
-
-        Ok(())
+    pub fn pieces(&self) -> Vec<Vec<u8>> {
+        self.torrent.pieces.clone()
     }
 
-    pub async fn read_piece(&self, index: u32, begin: u32, length: u32) -> anyhow::Result<Vec<u8>> {
-        // TODO
-        let file_path = "test.txt"; // Hardcoded for simplicity
-        let mut file = File::open(file_path)?;
-
-        let offset = (index as u64 * self.torrent.piece_length as u64) + begin as u64;
-        file.seek(SeekFrom::Start(offset))?;
-        let mut buffer = vec![0u8; length as usize];
-        file.read_exact(&mut buffer)?;
-
-        Ok(buffer)
+    pub fn length(&self) -> i64 {
+        self.torrent.length
     }
 }
 

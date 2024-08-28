@@ -3,7 +3,7 @@ use log::{debug, error, info};
 use models::{AnnounceResponse, AnnounceResponseRaw, RegisterRequest};
 use serde_derive::Serialize;
 
-use crate::torrent::TorrentFile;
+use crate::torrent::{PeerId, TorrentFile};
 
 #[derive(Debug, Serialize)]
 pub struct AnnounceRequest {
@@ -25,7 +25,10 @@ impl From<&TorrentFile> for AnnounceRequest {
     }
 }
 
-pub async fn try_announce(request: AnnounceRequest) -> anyhow::Result<AnnounceResponse> {
+pub async fn try_announce(
+    request: AnnounceRequest,
+    peer_id: &PeerId,
+) -> anyhow::Result<AnnounceResponse> {
     let announce_url = request.announce_url;
     let info_hash = request.info_hash;
     let left = request.left;
@@ -35,7 +38,7 @@ pub async fn try_announce(request: AnnounceRequest) -> anyhow::Result<AnnounceRe
     let response = reqwest::Client::new()
         .get(&announce_url)
         .query(&[("info_hash", info_hash)])
-        .query(&[("peer_id", "00112233445566778899")])
+        .query(&[("peer_id", peer_id.to_string())])
         .query(&[("port", 6881)])
         .query(&[("uploaded", 0)])
         .query(&[("downloaded", 0)])
@@ -80,7 +83,7 @@ pub async fn try_announce(request: AnnounceRequest) -> anyhow::Result<AnnounceRe
     }
 }
 
-pub async fn try_register(torrent: &TorrentFile) -> anyhow::Result<()> {
+pub async fn try_register(peer_id: &PeerId, torrent: &TorrentFile) -> anyhow::Result<()> {
     let announce_url = torrent.announce_url.clone();
     let info_hash = torrent.info_hash.clone();
     let name = torrent.torrent.name.clone();
@@ -88,7 +91,7 @@ pub async fn try_register(torrent: &TorrentFile) -> anyhow::Result<()> {
     let register_request = RegisterRequest {
         name,
         info_hash,
-        peer_id: "33333333336666666666".to_string(), // TODO peer_id
+        peer_id: peer_id.to_string(),
         ip: "127.0.0.1".to_string(),
         port: 6881,
     };
@@ -175,7 +178,8 @@ mod tests {
             left: 0,
         };
 
-        let result = try_announce(request).await;
+        let peer_id = PeerId::new();
+        let result = try_announce(request, &peer_id).await;
         assert!(result.is_ok());
 
         let announce_response = result.unwrap();
@@ -213,7 +217,8 @@ mod tests {
             left: 0,
         };
 
-        let result = try_announce(request).await;
+        let peer_id = PeerId::new();
+        let result = try_announce(request, &peer_id).await;
         assert!(result.is_err());
 
         assert_eq!(
@@ -242,7 +247,8 @@ mod tests {
             left: 0,
         };
 
-        let result = try_announce(request).await;
+        let peer_id = PeerId::new();
+        let result = try_announce(request, &peer_id).await;
         assert!(result.is_err());
 
         assert!(result

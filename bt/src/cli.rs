@@ -20,9 +20,9 @@ pub struct Cli {
 pub enum Commands {
     /// Download a file using a .torrent file
     Download {
-        /// Sets the path to the .torrent file to download
+        /// sets the path to the .torrent file to download
         #[clap(short, long)]
-        file: String,
+        torrent_file: String,
 
         /// Sets the output for downloaded files
         #[clap(short, long)]
