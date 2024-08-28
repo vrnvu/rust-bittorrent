@@ -3,16 +3,18 @@ use std::{
     io::Write,
     net::SocketAddr,
     path::Path,
+    time::Duration,
 };
 
 use anyhow::{bail, Context};
 use log::{debug, error, info};
 use sha1::{Digest, Sha1};
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, time::timeout};
 
 use crate::torrent::{self, PeerId, PeerMessage};
 
 const BLOCK_MAX_SIZE: u32 = 1 << 14;
+const PEER_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug)]
 pub struct TorrentFileMetadata {
@@ -62,7 +64,7 @@ impl PeerDownload {
             .with_context(|| "expected one peer at least")?;
 
         let mut stream = TcpStream::connect(peer).await?;
-        let peer_id =
+        let peer_id = timeout(PEER_TIMEOUT, async {
             torrent::HandshakeMessage::new(self.peer_id, self.torrent_metadata.info_hash_bytes)
                 .initiate(&mut stream)
                 .await
@@ -71,7 +73,10 @@ impl PeerDownload {
                         "error handshake initiate for info_hash: {}",
                         self.torrent_metadata.info_hash
                     )
-                })?;
+                })
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("Handshake timed out"))??;
         info!("handshake success with peer {}", peer_id);
 
         match torrent::PeerMessage::receive(&mut stream).await? {

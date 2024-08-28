@@ -78,8 +78,7 @@ impl PeerUpload {
         let peer_addr = stream.peer_addr()?;
         info!("New peer connection established from {}", peer_addr);
 
-        // TODO use timeout also in download_peer
-        timeout(PEER_TIMEOUT, async {
+        let peer_id = timeout(PEER_TIMEOUT, async {
             torrent::HandshakeMessage::new(peer_id, torrent_metadata.info_hash_bytes)
                 .initiate(&mut stream)
                 .await
@@ -92,7 +91,7 @@ impl PeerUpload {
         })
         .await
         .map_err(|_| anyhow::anyhow!("Handshake timed out"))??;
-        info!("Handshake completed with peer {}", peer_addr);
+        info!("handshake success with peer {}", peer_id);
 
         // TODO: send bitfield to peer
         PeerMessage::Bitfield(vec![0]).send(&mut stream).await?;
