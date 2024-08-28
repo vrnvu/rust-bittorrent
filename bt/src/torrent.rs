@@ -13,7 +13,7 @@ use tokio::{
 
 const PEER_ID_BT_VERSION: &str = "-BT0001-";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct PeerId([u8; 20]);
 
 impl PeerId {
@@ -187,10 +187,9 @@ pub struct HandshakeMessage {
 }
 
 impl HandshakeMessage {
-    pub fn new(info_hash_bytes: [u8; 20]) -> Self {
-        let peer_id: [u8; 20] = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9];
+    pub fn new(peer_id: PeerId, info_hash_bytes: [u8; 20]) -> Self {
         Self {
-            peer_id,
+            peer_id: peer_id.0,
             info_hash_bytes,
         }
     }
@@ -223,7 +222,9 @@ impl HandshakeMessage {
             .context("failed to receive handshake")?;
 
         let peer_id = &buffer[48..];
-        Ok(hex::encode(peer_id))
+        // TODO we do not need hex representation of peer id for our own tracker as we control the representation
+        let peer_id_string = String::from_utf8(peer_id.to_vec())?;
+        Ok(peer_id_string)
     }
 }
 
@@ -497,7 +498,8 @@ mod tests {
         });
 
         let mock_info_hash_bytes = [0_u8; 20];
-        let mut handshake = HandshakeMessage::new(mock_info_hash_bytes);
+        let mock_peer_id = PeerId::new();
+        let mut handshake = HandshakeMessage::new(mock_peer_id, mock_info_hash_bytes);
 
         let mut stream = TcpStream::connect(mock_addr).await?;
         handshake.send(&mut stream).await?;
@@ -506,10 +508,7 @@ mod tests {
         rx.await?;
 
         let peer_id = handshake.receive(&mut stream).await?;
-        assert_eq!(
-            peer_id,
-            hex::encode([0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9])
-        );
+        assert_eq!(peer_id, mock_peer_id.to_string());
 
         Ok(())
     }

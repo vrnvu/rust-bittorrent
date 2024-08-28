@@ -1,6 +1,6 @@
 use std::env;
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use clap::Parser;
 use cli::Commands;
 use dialoguer::theme::ColorfulTheme;
@@ -56,15 +56,21 @@ async fn download(output_path: &str, torrent_file: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn upload(file: &str, port: &str) -> anyhow::Result<()> {
+async fn upload(file: &str, port: &str, tracker_port: u16) -> anyhow::Result<()> {
     let peer_upload = peer_upload::PeerUpload::new();
     info!(
         "starting uploader with peer_id: {} for file: {}",
         peer_upload.peer_id, file
     );
-    let torrent = torrent::TorrentFile::from_path(file)?;
+
+    let torrent = if file.ends_with(".torrent") {
+        bail!("uploading .torrent currently not supported by peer upload")
+    } else {
+        torrent::TorrentFile::try_as_torrent_file(file, tracker_port)?
+    };
+
     http::try_register(&peer_upload.peer_id, &torrent).await?;
-    peer_upload.upload(torrent, port).await?;
+    peer_upload.upload(torrent, port, file).await?;
     Ok(())
 }
 
@@ -83,7 +89,11 @@ async fn main() -> anyhow::Result<()> {
             torrent_file,
             output_path,
         } => download(output_path, torrent_file).await,
-        Commands::Upload { file, port } => upload(file, port).await,
+        Commands::Upload {
+            file,
+            port,
+            tracker_port,
+        } => upload(file, port, *tracker_port).await,
         Commands::Interactive => {
             let announce_url = "http://localhost:9999/announce";
             let files = http::try_list_files(announce_url).await?;

@@ -14,6 +14,7 @@ use crate::torrent::{self, PeerId, PeerMessage};
 
 const BLOCK_MAX_SIZE: u32 = 1 << 14;
 
+#[derive(Debug)]
 pub struct TorrentFileMetadata {
     length: i64,
     pieces: Vec<Vec<u8>>,
@@ -61,15 +62,16 @@ impl PeerDownload {
             .with_context(|| "expected one peer at least")?;
 
         let mut stream = TcpStream::connect(peer).await?;
-        let peer_id = torrent::HandshakeMessage::new(self.torrent_metadata.info_hash_bytes)
-            .initiate(&mut stream)
-            .await
-            .with_context(|| {
-                format!(
-                    "error handshake initiate for info_hash: {}",
-                    self.torrent_metadata.info_hash
-                )
-            })?;
+        let peer_id =
+            torrent::HandshakeMessage::new(self.peer_id, self.torrent_metadata.info_hash_bytes)
+                .initiate(&mut stream)
+                .await
+                .with_context(|| {
+                    format!(
+                        "error handshake initiate for info_hash: {}",
+                        self.torrent_metadata.info_hash
+                    )
+                })?;
         info!("handshake success with peer {}", peer_id);
 
         match torrent::PeerMessage::receive(&mut stream).await? {

@@ -19,14 +19,16 @@ const PEER_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_CONSECUTIVE_TIMEOUTS: usize = 3;
 
 struct TorrentFileMetadata {
+    file_path: String,
     info_hash: String,
     info_hash_bytes: [u8; 20],
     piece_length: i64,
 }
 
 impl TorrentFileMetadata {
-    pub fn new(torrent: TorrentFile) -> Self {
+    pub fn new(torrent: TorrentFile, file_path: &str) -> Self {
         Self {
+            file_path: file_path.to_string(),
             info_hash: torrent.info_hash.clone(),
             info_hash_bytes: torrent.info_hash_bytes,
             piece_length: torrent.piece_length(),
@@ -45,16 +47,22 @@ impl PeerUpload {
         }
     }
 
-    pub async fn upload(self, torrent: TorrentFile, port: &str) -> anyhow::Result<()> {
+    pub async fn upload(
+        self,
+        torrent: TorrentFile,
+        port: &str,
+        file_path: &str,
+    ) -> anyhow::Result<()> {
         let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await?;
         info!("Uploader listening on {}", listener.local_addr()?);
-        let torrent_metadata = TorrentFileMetadata::new(torrent);
+        let torrent_metadata = TorrentFileMetadata::new(torrent, file_path);
         let torrent_metadata = Arc::new(torrent_metadata);
 
         while let Ok((stream, _)) = listener.accept().await {
             let torrent_metadata_ref = Arc::clone(&torrent_metadata);
             tokio::spawn(async move {
-                if let Err(e) = Self::handle_peer(stream, &torrent_metadata_ref).await {
+                if let Err(e) = Self::handle_peer(stream, &torrent_metadata_ref, self.peer_id).await
+                {
                     error!("Error handling peer: {:?}", e);
                 }
             });
@@ -65,13 +73,14 @@ impl PeerUpload {
     async fn handle_peer(
         mut stream: TcpStream,
         torrent_metadata: &TorrentFileMetadata,
+        peer_id: PeerId,
     ) -> anyhow::Result<()> {
         let peer_addr = stream.peer_addr()?;
         info!("New peer connection established from {}", peer_addr);
 
         // TODO use timeout also in download_peer
         timeout(PEER_TIMEOUT, async {
-            torrent::HandshakeMessage::new(torrent_metadata.info_hash_bytes)
+            torrent::HandshakeMessage::new(peer_id, torrent_metadata.info_hash_bytes)
                 .initiate(&mut stream)
                 .await
                 .with_context(|| {
@@ -109,9 +118,13 @@ impl PeerUpload {
                     consecutive_timeouts = 0;
                     debug!("Received message from {}: {:?}", peer_addr, message);
 
-                    if let Err(e) =
-                        Self::handle_message(message, &mut stream, torrent_metadata.piece_length)
-                            .await
+                    if let Err(e) = Self::handle_message(
+                        torrent_metadata.file_path.as_str(),
+                        message,
+                        &mut stream,
+                        torrent_metadata.piece_length,
+                    )
+                    .await
                     {
                         warn!("Error handling message from {}: {}", peer_addr, e);
                         break;
@@ -146,6 +159,7 @@ impl PeerUpload {
     }
 
     async fn handle_message(
+        file_path: &str,
         message: torrent::PeerMessage,
         stream: &mut TcpStream,
         torrent_piece_length: i64,
@@ -157,6 +171,7 @@ impl PeerUpload {
                 length,
             } => {
                 let piece = Self::read_piece(
+                    file_path,
                     torrent_piece_length as u64,
                     index as u64,
                     begin as u64,
@@ -179,6 +194,7 @@ impl PeerUpload {
     }
 
     async fn read_piece(
+        file_path: &str,
         torrent_piece_length: u64,
         index: u64,
         begin: u64,
@@ -188,7 +204,6 @@ impl PeerUpload {
         // if we keep files open we can skip seek and just read the buffer
         // if users has a lot of large files it can run out of memory
         // we can try to use mmap to map the file into memory and keep files open for a memory lower than THRESHOLD
-        let file_path = "test.txt"; // Hardcoded for simplicity
         let mut file = File::open(file_path)?;
 
         let offset = (index * torrent_piece_length) + begin;

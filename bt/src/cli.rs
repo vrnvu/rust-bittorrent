@@ -37,6 +37,10 @@ pub enum Commands {
         /// Sets peer port
         #[clap(short, long)]
         port: String,
+
+        /// Sets tracker port
+        #[clap(short, long)]
+        tracker_port: u16,
     },
     /// Interactive mode
     Interactive, // TODO: we need a download interactive session and upload mode
