@@ -46,15 +46,14 @@ async fn download(output_path: &str, torrent_file: &str) -> anyhow::Result<()> {
         )
     })?;
 
-    // TODO: download from multiple peers
-    // handshake with all of them and send interested
-    // request pieces from a pool of pending pieces
+    // TODO: keep alive and removal of peers
     let mut streams: Vec<TcpStream> = Vec::new();
     for peer in announce_response.peers {
         let stream = peer_download.init_peer(&peer).await?;
         streams.push(stream);
     }
 
+    // TODO: request pieces from a pool of pending pieces
     peer_download.download(streams).await?;
 
     Ok(())

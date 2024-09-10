@@ -115,8 +115,13 @@ impl PeerDownload {
             let stream = streams
                 .get_mut(piece_index % streams_len)
                 .context("no stream available")?;
+
             let piece_index = piece_index as i64;
-            let piece = Self::download_piece(stream, piece_index, &self.torrent_metadata).await?;
+            let piece_length = self.torrent_metadata.piece_length.min(
+                self.torrent_metadata.length - (self.torrent_metadata.piece_length * piece_index),
+            ) as u32;
+            let piece_hash = &self.torrent_metadata.pieces[piece_index as usize];
+            let piece = Self::download_piece(stream, piece_index, piece_length, piece_hash).await?;
             downloaded_torrent.push(piece);
             debug!(
                 "piece_index: {} downloaded successfully for info_hash: {}",
@@ -148,15 +153,12 @@ impl PeerDownload {
     pub async fn download_piece(
         stream: &mut TcpStream,
         piece_index: i64,
-        torrent_metadata: &TorrentFileMetadata,
+        piece_length: u32,
+        piece_hash: &[u8],
     ) -> anyhow::Result<Vec<u8>> {
-        let piece_length = torrent_metadata
-            .piece_length
-            .min(torrent_metadata.length - (torrent_metadata.piece_length * piece_index));
-
         let mut piece: Vec<u8> = Vec::with_capacity(piece_length as usize);
         let mut begin_offset: u32 = 0;
-        let mut remain: u32 = piece_length as u32;
+        let mut remain: u32 = piece_length;
         while remain != 0 {
             let block_size = BLOCK_MAX_SIZE.min(remain);
             PeerMessage::Request {
@@ -186,11 +188,6 @@ impl PeerDownload {
             begin_offset += block_size;
             remain -= block_size;
         }
-
-        let piece_hash = torrent_metadata
-            .pieces
-            .get(piece_index as usize)
-            .context("invalid index for piece hash")?;
 
         let current_hash: [u8; 20] = {
             let mut hasher = Sha1::new();
