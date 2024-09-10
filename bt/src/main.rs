@@ -8,6 +8,7 @@ use dialoguer::{Confirm, FuzzySelect, Input};
 use http::AnnounceRequest;
 use log::info;
 use peer_download::TorrentFileMetadata;
+use tokio::net::TcpStream;
 
 mod cli;
 mod http;
@@ -45,13 +46,16 @@ async fn download(output_path: &str, torrent_file: &str) -> anyhow::Result<()> {
         )
     })?;
 
-    let peer = announce_response
-        .peers
-        .first()
-        .with_context(|| format!("expected one peer at least for torrent: {}", torrent_file))?;
-
     // TODO: download from multiple peers
-    peer_download.download(&[*peer]).await?;
+    // handshake with all of them and send interested
+    // request pieces from a pool of pending pieces
+    let mut streams: Vec<TcpStream> = Vec::new();
+    for peer in announce_response.peers {
+        let stream = peer_download.init_peer(&peer).await?;
+        streams.push(stream);
+    }
+
+    peer_download.download(streams).await?;
 
     Ok(())
 }

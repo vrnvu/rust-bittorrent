@@ -50,6 +50,7 @@ impl FileListing {
 
     fn add(&self, file_name: &FileName, info_hash: &InfoHash) -> anyhow::Result<()> {
         let mut inner = self.inner.write().unwrap();
+        // TODO important: allow multiple peers to upload the same file
         if inner.contains_key(file_name) {
             return Err(anyhow::anyhow!(format!(
                 "file already exists: {}",

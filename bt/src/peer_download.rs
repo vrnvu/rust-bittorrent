@@ -58,11 +58,7 @@ impl PeerDownload {
         }
     }
 
-    pub async fn download(&self, peers: &[SocketAddr]) -> anyhow::Result<()> {
-        let peer = peers
-            .first()
-            .with_context(|| "expected one peer at least")?;
-
+    pub async fn init_peer(&self, peer: &SocketAddr) -> anyhow::Result<TcpStream> {
         let mut stream = TcpStream::connect(peer).await?;
         let peer_id = timeout(PEER_TIMEOUT, async {
             torrent::HandshakeMessage::new(self.peer_id, self.torrent_metadata.info_hash_bytes)
@@ -108,47 +104,45 @@ impl PeerDownload {
                 bail!("expected: Unchoke, got:{:?}", other);
             }
         }
-
-        Self::download_from_stream(&mut stream, &self.output_path, &self.torrent_metadata)
-            .await
-            .with_context(|| "failed to download torrent")?;
-
-        info!("success");
-
-        Ok(())
+        Ok(stream)
     }
 
-    async fn download_from_stream(
-        stream: &mut TcpStream,
-        output_path: &str,
-        torrent_metadata: &TorrentFileMetadata,
-    ) -> anyhow::Result<()> {
-        // TODO download pieces in parallel batches and random order
+    pub async fn download(&self, mut streams: Vec<TcpStream>) -> anyhow::Result<()> {
         let mut downloaded_torrent = Vec::new();
-        for piece_index in 0..torrent_metadata.pieces.len() {
-            // TODO u32 vs usize indexing and conversion in protocol
-            // what are safe assumptions to make about it
-            let piece = Self::download_piece(stream, piece_index as i64, torrent_metadata).await?;
+        let streams_len = streams.len();
+        for piece_index in 0..self.torrent_metadata.pieces.len() {
+            // TODO: round robin strategy for downloading pieces from peers
+            let mut stream = streams
+                .get_mut(piece_index % streams_len)
+                .context("no stream available")?;
+            let piece_index = piece_index as i64;
+            let piece =
+                Self::download_piece(&mut stream, piece_index, &self.torrent_metadata).await?;
             downloaded_torrent.push(piece);
             debug!(
                 "piece_index: {} downloaded successfully for info_hash: {}",
-                piece_index, torrent_metadata.info_hash
+                piece_index, self.torrent_metadata.info_hash
             );
         }
 
         let bytes = downloaded_torrent.concat();
-        if let Some(parent) = Path::new(output_path).parent() {
+        if let Some(parent) = Path::new(&self.output_path).parent() {
             fs::create_dir_all(parent).context("cannot create output directory")?;
         }
 
-        let mut f = File::create(output_path).context("cannot create output file")?;
-        f.write_all(&bytes)
-            .with_context(|| format!("failed to write downloaded data to file {}", output_path))?;
+        let mut f = File::create(&self.output_path).context("cannot create output file")?;
+        f.write_all(&bytes).with_context(|| {
+            format!(
+                "failed to write downloaded data to file {}",
+                &self.output_path
+            )
+        })?;
         info!(
             "torrent info_hash: {} downloaded successfully to {}",
-            torrent_metadata.info_hash, output_path
+            self.torrent_metadata.info_hash, &self.output_path
         );
 
+        info!("success");
         Ok(())
     }
 
