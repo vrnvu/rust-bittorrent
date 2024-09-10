@@ -112,12 +112,11 @@ impl PeerDownload {
         let streams_len = streams.len();
         for piece_index in 0..self.torrent_metadata.pieces.len() {
             // TODO: round robin strategy for downloading pieces from peers
-            let mut stream = streams
+            let stream = streams
                 .get_mut(piece_index % streams_len)
                 .context("no stream available")?;
             let piece_index = piece_index as i64;
-            let piece =
-                Self::download_piece(&mut stream, piece_index, &self.torrent_metadata).await?;
+            let piece = Self::download_piece(stream, piece_index, &self.torrent_metadata).await?;
             downloaded_torrent.push(piece);
             debug!(
                 "piece_index: {} downloaded successfully for info_hash: {}",
