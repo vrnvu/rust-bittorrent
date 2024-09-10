@@ -16,6 +16,27 @@ use crate::torrent::{self, PeerId, PeerMessage};
 const BLOCK_MAX_SIZE: u32 = 1 << 14;
 const PEER_TIMEOUT: Duration = Duration::from_secs(3);
 
+pub struct PieceRequest {
+    piece_index: i64,
+    piece_length: u32,
+    piece_hash: Vec<u8>,
+}
+
+impl PieceRequest {
+    pub fn new(torrent_metadata: &TorrentFileMetadata, piece_index: i64) -> Self {
+        let piece_length = torrent_metadata
+            .piece_length
+            .min(torrent_metadata.length - (torrent_metadata.piece_length * piece_index))
+            as u32;
+        let piece_hash = torrent_metadata.pieces[piece_index as usize].clone();
+        PieceRequest {
+            piece_index,
+            piece_length,
+            piece_hash,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct TorrentFileMetadata {
     length: i64,
@@ -116,12 +137,8 @@ impl PeerDownload {
                 .get_mut(piece_index % streams_len)
                 .context("no stream available")?;
 
-            let piece_index = piece_index as i64;
-            let piece_length = self.torrent_metadata.piece_length.min(
-                self.torrent_metadata.length - (self.torrent_metadata.piece_length * piece_index),
-            ) as u32;
-            let piece_hash = &self.torrent_metadata.pieces[piece_index as usize];
-            let piece = Self::download_piece(stream, piece_index, piece_length, piece_hash).await?;
+            let piece_request = PieceRequest::new(&self.torrent_metadata, piece_index as i64);
+            let piece = Self::download_piece(stream, piece_request).await?;
             downloaded_torrent.push(piece);
             debug!(
                 "piece_index: {} downloaded successfully for info_hash: {}",
@@ -152,10 +169,14 @@ impl PeerDownload {
 
     pub async fn download_piece(
         stream: &mut TcpStream,
-        piece_index: i64,
-        piece_length: u32,
-        piece_hash: &[u8],
+        piece_request: PieceRequest,
     ) -> anyhow::Result<Vec<u8>> {
+        let PieceRequest {
+            piece_index,
+            piece_length,
+            piece_hash,
+        } = piece_request;
+
         let mut piece: Vec<u8> = Vec::with_capacity(piece_length as usize);
         let mut begin_offset: u32 = 0;
         let mut remain: u32 = piece_length;
