@@ -457,13 +457,7 @@ mod tests {
         let temporal_file = tempfile::NamedTempFile::new().unwrap();
         let output_path = temporal_file.path().to_str().unwrap();
         let torrent = TorrentFile::write_torrent_file(path, output_path);
-        match torrent {
-            Err(e) => {
-                println!("Error: {:?}", e);
-                panic!("Failed to write torrent file");
-            }
-            _ => (),
-        }
+        assert!(torrent.is_ok());
     }
 
     #[tokio::test]
