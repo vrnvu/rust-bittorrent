@@ -2,6 +2,11 @@
 
 A minimal BitTorrent client and tracker written in Rust, focusing on simplicity and functionality.
 
+<img width="1575" alt="Screenshot 2024-09-11 at 15 47 58" src="https://github.com/user-attachments/assets/99063479-6fb9-4907-a7a8-8fd1ee2c0d7e">
+<img width="1692" alt="Screenshot 2024-09-11 at 15 48 09" src="https://github.com/user-attachments/assets/7696b10d-c037-4af6-b9e8-30ec7393290a">
+<img width="1570" alt="Screenshot 2024-09-11 at 15 47 49" src="https://github.com/user-attachments/assets/434a874a-8a33-4256-8f51-e088749d55a3">
+
+
 ## Project Structure
 
 - **bt**: The BitTorrent client that handles torrent parsing, peer communication, and file exchange.
