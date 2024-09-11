@@ -17,6 +17,7 @@ A minimal BitTorrent client and tracker written in Rust, focusing on simplicity 
 - **Asynchronous IO**: Utilizes Tokio for efficient networking.
 - **Upload Mode**: Allows sharing of files with other peers.
 - **Download Mode**: Fetches files from other peers.
+- **Parallel Download**: Downloads files from multiple peers simultaneously, improving download speeds.
 
 ### Tracker
 
@@ -26,12 +27,13 @@ A minimal BitTorrent client and tracker written in Rust, focusing on simplicity 
 
 ## Current State of the Project
 
-The project currently supports basic BitTorrent functionality:
+The project currently supports basic BitTorrent functionality with enhancements for parallel downloads:
 
 1. The tracker allows peers to register the content they have available.
 2. Peers can operate in both upload and download modes.
 3. The tracker is used for peer discovery and content discovery.
 4. The client can parse .torrent files and communicate with peers.
+5. The client can download files from multiple peers simultaneously, improving download speeds.
 
 ## Usage and Explanation
 
@@ -63,7 +65,7 @@ The project currently supports basic BitTorrent functionality:
 2. The client parses the .torrent file to extract the info hash and tracker URL.
 3. The client sends an HTTP request to the tracker to get a list of peers for the desired file.
 4. The tracker responds with available peers for the requested info hash.
-5. The client initiates the BitTorrent protocol with the available peers:
+5. The client initiates the BitTorrent protocol with the available peers in parallel:
    - Establishes connections
    - Performs handshakes
    - Exchanges piece information
@@ -76,6 +78,7 @@ The project currently supports basic BitTorrent functionality:
 - The BitTorrent protocol implementation is functional and compatible with other peers/trackers but lacks advanced optimizations.
 - The upload process currently doesn't implement background seeding (planned for future updates).
 - The system doesn't currently implement peer health checks or sophisticated peer selection strategies.
+- The client now supports parallel downloads from multiple peers, enhancing download speeds.
 
 ### Future Improvements
 
@@ -84,4 +87,4 @@ The project currently supports basic BitTorrent functionality:
 - Implement more sophisticated peer selection and piece selection algorithms
 - Support for other tracker protocols (e.g., UDP)
 - Implement DHT (Distributed Hash Table) for trackerless operation
-
+- Optimize parallel download for better performance and resource utilization
