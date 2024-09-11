@@ -83,7 +83,11 @@ pub async fn try_announce(
     }
 }
 
-pub async fn try_register(peer_id: &PeerId, torrent: &TorrentFile) -> anyhow::Result<()> {
+pub async fn try_register(
+    peer_id: &PeerId,
+    port: u16,
+    torrent: &TorrentFile,
+) -> anyhow::Result<()> {
     let announce_url = torrent.announce_url.clone();
     let info_hash = torrent.info_hash.clone();
     let name = torrent.torrent.name.clone();
@@ -93,7 +97,7 @@ pub async fn try_register(peer_id: &PeerId, torrent: &TorrentFile) -> anyhow::Re
         info_hash,
         peer_id: peer_id.to_string(),
         ip: "127.0.0.1".to_string(),
-        port: 6881,
+        port,
     };
     info!(
         "sending register request {:?} to {announce_url}",

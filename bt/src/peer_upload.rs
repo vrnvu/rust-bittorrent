@@ -50,7 +50,7 @@ impl PeerUpload {
     pub async fn upload(
         self,
         torrent: TorrentFile,
-        port: &str,
+        port: u16,
         file_path: &str,
     ) -> anyhow::Result<()> {
         let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await?;

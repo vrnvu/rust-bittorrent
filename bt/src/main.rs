@@ -49,9 +49,11 @@ async fn download(output_path: &str, torrent_file: &str) -> anyhow::Result<()> {
     // TODO: keep alive and removal of peers
     let mut streams: Vec<TcpStream> = Vec::new();
     for peer in announce_response.peers {
+        info!("peer: {:?}", peer);
         let stream = peer_download.init_peer(&peer).await?;
         streams.push(stream);
     }
+    info!("streams: {:?}", streams);
 
     // TODO: request pieces from a pool of pending pieces
     peer_download.download(streams).await?;
@@ -59,7 +61,7 @@ async fn download(output_path: &str, torrent_file: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn upload(file: &str, port: &str, tracker_port: u16) -> anyhow::Result<()> {
+async fn upload(file: &str, port: u16, tracker_port: u16) -> anyhow::Result<()> {
     let peer_upload = peer_upload::PeerUpload::new();
     info!(
         "starting uploader with peer_id: {} for file: {}",
@@ -72,7 +74,7 @@ async fn upload(file: &str, port: &str, tracker_port: u16) -> anyhow::Result<()>
         torrent::TorrentFile::try_as_torrent_file(file, tracker_port)?
     };
 
-    http::try_register(&peer_upload.peer_id, &torrent).await?;
+    http::try_register(&peer_upload.peer_id, port, &torrent).await?;
     peer_upload.upload(torrent, port, file).await?;
     Ok(())
 }
@@ -96,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
             file,
             port,
             tracker_port,
-        } => upload(file, port, *tracker_port).await,
+        } => upload(file, *port, *tracker_port).await,
         Commands::Interactive => {
             let announce_url = "http://localhost:9999/announce";
             let files = http::try_list_files(announce_url).await?;

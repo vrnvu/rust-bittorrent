@@ -36,7 +36,7 @@ pub enum Commands {
 
         /// Sets peer port
         #[clap(short, long)]
-        port: String,
+        port: u16,
 
         /// Sets tracker port
         #[clap(short, long)]

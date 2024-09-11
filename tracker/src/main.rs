@@ -40,7 +40,7 @@ type InfoHash = String;
 
 #[derive(Debug, Default, Clone)]
 pub struct FileListing {
-    inner: Arc<RwLock<HashMap<FileName, InfoHash>>>,
+    inner: Arc<RwLock<HashMap<InfoHash, FileName>>>,
 }
 
 impl FileListing {
@@ -50,14 +50,10 @@ impl FileListing {
 
     fn add(&self, file_name: &FileName, info_hash: &InfoHash) -> anyhow::Result<()> {
         let mut inner = self.inner.write().unwrap();
-        // TODO important: allow multiple peers to upload the same file
-        if inner.contains_key(file_name) {
-            return Err(anyhow::anyhow!(format!(
-                "file already exists: {}",
-                file_name
-            )));
+        if inner.contains_key(info_hash) {
+            return Ok(());
         }
-        inner.insert(file_name.clone(), info_hash.clone());
+        inner.insert(info_hash.clone(), file_name.clone());
         Ok(())
     }
 
@@ -67,7 +63,7 @@ impl FileListing {
             .read()
             .map_err(|_| anyhow::anyhow!("failed to lock file listing"))?;
 
-        Ok(inner.keys().cloned().collect())
+        Ok(inner.values().cloned().collect())
     }
 }
 
@@ -385,12 +381,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_multiple_peers_announce() -> anyhow::Result<()> {
+    async fn test_announce_post_same_info_hash() -> anyhow::Result<()> {
         let mock_request = MockRequest::new();
 
         let peer_1 = RegisterRequest::new("test1", "info_hash_1", "peer1", "192.168.1.2", 6881);
         let peer_2 = RegisterRequest::new("test2", "info_hash_1", "peer2", "192.168.1.3", 6882);
-        let peer_3 = RegisterRequest::new("test3", "info_hash_2", "peer3", "192.168.1.4", 6883);
+
+        // Announce for peer 1
+        let response_1 = mock_request.post_announce(&peer_1).await;
+        assert_eq!(response_1.status(), warp::http::StatusCode::NO_CONTENT);
+
+        // Announce for peer 2
+        let response_2 = mock_request.post_announce(&peer_2).await;
+        assert_eq!(response_2.status(), warp::http::StatusCode::NO_CONTENT);
+
+        // We had test1 and test2 names, but test1 the first to POST is stored
+        let response_3 = mock_request.get_file_listing().await;
+        assert_eq!(response_3.status(), warp::http::StatusCode::OK);
+        assert_eq!(response_3.body(), "[\"test1\"]");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_multiple_peers_announce() -> anyhow::Result<()> {
+        let mock_request = MockRequest::new();
+
+        // TODO allow multiple peers to upload the same file
+        let peer_1 = RegisterRequest::new("test1", "info_hash_1", "peer1", "192.168.1.2", 6881);
+        let peer_2 = RegisterRequest::new("test1", "info_hash_1", "peer2", "192.168.1.3", 6882);
+        let peer_3 = RegisterRequest::new("test3", "info_hash_3", "peer3", "192.168.1.4", 6883);
 
         // Announce for peer 1
         let response_1 = mock_request.post_announce(&peer_1).await;
@@ -417,12 +437,6 @@ mod tests {
             .iter()
             .any(|peer| peer.ip().to_string() == "192.168.1.3" && peer.port() == 6882));
 
-        // Check peers for info_hash_2
-        let peers_info_hash_2 = db.get("info_hash_2").unwrap();
-        assert_eq!(peers_info_hash_2.len(), 1);
-        assert!(peers_info_hash_2
-            .iter()
-            .any(|peer| peer.ip().to_string() == "192.168.1.4" && peer.port() == 6883));
         Ok(())
     }
 
@@ -473,20 +487,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_post_and_get_file_listing_conflict_file_name() -> anyhow::Result<()> {
+    async fn test_post_and_get_file_listing_same_info_hash() -> anyhow::Result<()> {
         let mock_request = MockRequest::new();
 
-        let peer_1 = RegisterRequest::new("test", "info_hash_1", "peer1", "192.168.1.2", 6881);
+        let peer_1 = RegisterRequest::new("test1", "info_hash_1", "peer1", "192.168.1.2", 6881);
         let response_1 = mock_request.post_announce(&peer_1).await;
         assert_eq!(response_1.status(), warp::http::StatusCode::NO_CONTENT);
 
-        let peer_2 = RegisterRequest::new("test", "info_hash_2", "peer2", "192.168.1.3", 6882);
+        let peer_2 = RegisterRequest::new("test2", "info_hash_1", "peer2", "192.168.1.3", 6882);
         let response_2 = mock_request.post_announce(&peer_2).await;
-        assert_eq!(response_2.status(), warp::http::StatusCode::BAD_REQUEST);
-        assert_eq!(
-            response_2.body(),
-            format!("file already exists: {}", peer_2.name).as_bytes()
-        );
+        assert_eq!(response_2.status(), warp::http::StatusCode::NO_CONTENT);
+
+        let response_3 = mock_request.get_file_listing().await;
+        assert_eq!(response_3.status(), warp::http::StatusCode::OK);
+        assert_eq!(response_3.body(), "[\"test1\"]");
 
         Ok(())
     }

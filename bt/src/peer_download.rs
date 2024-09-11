@@ -128,22 +128,44 @@ impl PeerDownload {
         Ok(stream)
     }
 
-    pub async fn download(&self, mut streams: Vec<TcpStream>) -> anyhow::Result<()> {
-        let mut downloaded_torrent = Vec::new();
-        let streams_len = streams.len();
+    pub async fn download(&self, streams: Vec<TcpStream>) -> anyhow::Result<()> {
+        let mut piece_requests = Vec::new();
         for piece_index in 0..self.torrent_metadata.pieces.len() {
-            // TODO: round robin strategy for downloading pieces from peers
-            let stream = streams
-                .get_mut(piece_index % streams_len)
-                .context("no stream available")?;
-
             let piece_request = PieceRequest::new(&self.torrent_metadata, piece_index as i64);
-            let piece = Self::download_piece(stream, piece_request).await?;
-            downloaded_torrent.push(piece);
-            debug!(
-                "piece_index: {} downloaded successfully for info_hash: {}",
-                piece_index, self.torrent_metadata.info_hash
-            );
+            piece_requests.push(piece_request);
+        }
+        let pieces_to_download = piece_requests.len();
+
+        let (input_tx, input_rx) = async_channel::unbounded();
+        let (output_tx, output_rx) = async_channel::unbounded();
+
+        for stream in streams.into_iter() {
+            let input_rx = input_rx.clone();
+            let output_tx = output_tx.clone();
+
+            tokio::spawn(async move {
+                Self::start_stream_downloader(stream, input_rx, output_tx).await
+            });
+        }
+
+        for piece_request in piece_requests {
+            let input_tx = input_tx.clone();
+            tokio::spawn(async move { input_tx.send(piece_request).await });
+        }
+
+        let mut downloaded_torrent = Vec::new();
+        while let Ok(piece) = output_rx.recv().await {
+            match piece {
+                Ok(piece) => {
+                    downloaded_torrent.push(piece);
+                    if downloaded_torrent.len() == pieces_to_download {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    error!("failed to download piece: {}", e);
+                }
+            }
         }
 
         let bytes = downloaded_torrent.concat();
@@ -164,6 +186,21 @@ impl PeerDownload {
         );
 
         info!("success");
+        Ok(())
+    }
+
+    async fn start_stream_downloader(
+        mut stream: TcpStream,
+        input_rx: async_channel::Receiver<PieceRequest>,
+        output_tx: async_channel::Sender<anyhow::Result<Vec<u8>>>,
+    ) -> anyhow::Result<()> {
+        while let Ok(piece_request) = input_rx.recv().await {
+            let piece = Self::download_piece(&mut stream, piece_request).await?;
+            output_tx
+                .send(Ok(piece))
+                .await
+                .with_context(|| "failed to send piece to output_tx")?;
+        }
         Ok(())
     }
 
