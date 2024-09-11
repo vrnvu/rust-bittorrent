@@ -460,9 +460,9 @@ mod tests {
         match torrent {
             Err(e) => {
                 println!("Error: {:?}", e);
-                assert!(false);
+                panic!("Failed to write torrent file");
             }
-            _ => assert!(true),
+            _ => (),
         }
     }
 
