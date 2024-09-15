@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 models = { path = "../models" }
-anyhow = "1.0.86"
+anyhow = "1.0.88"
 tokio = { version = "1", features = ["full"] }
 warp = "0.3.7"
 serde = { version = "1.0.203", features = ["derive"] }
