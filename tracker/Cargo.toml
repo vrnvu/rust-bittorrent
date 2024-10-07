@@ -5,16 +5,16 @@ edition = "2021"
 
 [dependencies]
 models = { path = "../models" }
-anyhow = "1.0.88"
+anyhow = "1.0.89"
 tokio = { version = "1", features = ["full"] }
 warp = "0.3.7"
 serde = { version = "1.0.210", features = ["derive"] }
 serde_bencode = "^0.2.4"
 log = "0.4.21"
 env_logger = "0.11.3"
-bytes = "1.7.1"
+bytes = "1.7.2"
 serde_json = "1.0.128"
 
 [dev-dependencies]
-wiremock = "0.6.0"
 reqwest = "0.12.8"
+wiremock = "0.6.2"
